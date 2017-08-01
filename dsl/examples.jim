@@ -1,0 +1,39 @@
+// The following are several examples of valid syntax
+
+list
+
+set masterbedroom/lights off
+set masterbedroom/lights on
+
+set downstairs/lights 50
+
+var bed_lights = get masterbedroom/lights
+
+set downstairs/lights bed_lights
+
+scene nightime {
+    set */light off
+    set */door locked
+    set porch/light on
+
+    on
+        */door is unlocked
+    wait 5m
+         set $ locked
+
+    when
+        */door is unlocked
+    wait 5m {
+        var x = get downstairs/lights
+        set $ x
+        when
+             */lights is on
+        wait 1m {
+            set $ off
+        }
+    }
+}
+
+at 9:00PM start nightime
+at 8:00AM stop nightime
+
