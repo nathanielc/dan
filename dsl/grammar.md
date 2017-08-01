@@ -20,7 +20,6 @@ SceneStatement    = "scene" word Block .
 AtStatement       = "at" Time Action word .
 Time              = { digit } ":" { digit } ( "AM" | "PM" )
 Action            = ( "start" | "stop" )
-WhenStatement     = "when" PathMatch "is" Value ( "wait" duration ) Block .
+WhenStatement     = "when" PathMatch "is" Value "wait" duration Block  | "when" PathMatch "is" Value Block .
 PathMatch         = "$" | { ( word | "*" ) "/" } ( word | "*" ) .
-
 ```
