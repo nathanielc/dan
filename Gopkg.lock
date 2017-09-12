@@ -20,10 +20,22 @@
   revision = "7645fb3632f8bb5df346d4b17594f48be227d336"
 
 [[projects]]
+  name = "github.com/gorhill/cronexpr"
+  packages = ["."]
+  revision = "a557574d6c024ed6e36acc8b610f5f211c91568a"
+  version = "1.0.0"
+
+[[projects]]
   branch = "master"
   name = "github.com/nathanielc/smarthome"
   packages = ["."]
   revision = "457c82b060f153d2b63458b34a11a40fb19c8f2a"
+
+[[projects]]
+  name = "github.com/pkg/errors"
+  packages = ["."]
+  revision = "645ef00459ed84a119197bfb8d8205042c6df63d"
+  version = "v0.8.0"
 
 [[projects]]
   branch = "master"
@@ -34,6 +46,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "b734953de3e04678fdc034105b7a89c6d427ef56cfc815e10baeedabd922fd60"
+  inputs-digest = "65a1f511ffc0497291b3328887cde10c48322a45a2581eb0ee90a1dc7861f876"
   solver-name = "gps-cdcl"
   solver-version = 1
