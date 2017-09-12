@@ -11,7 +11,7 @@ type Value smarthome.Value
 type Client interface {
 	Set(toplevel, device, value string) error
 	Get(toplevel, device string) (Value, error)
-	When(toplevel, device, value string, callback func()) error
+	When(toplevel, device, value string, callback func()) (func(), error)
 }
 
 type client struct {
@@ -20,9 +20,9 @@ type client struct {
 	wg sync.WaitGroup
 }
 
-func New() (Client, error) {
+func New(u string) (Client, error) {
 	opts := smarthome.DefaultMQTTClientOptions()
-	opts.AddBroker("tcp://localhost:1883")
+	opts.AddBroker(u)
 	opts.SetClientID("jim-smartmqtt")
 	c, err := smarthome.NewClient(opts)
 	if err != nil {
@@ -45,19 +45,29 @@ func (c *client) Get(toplevel, device string) (Value, error) {
 	return Value(v), nil
 }
 
-func (c *client) When(toplevel, device, value string, callback func()) error {
+func (c *client) When(toplevel, device, value string, callback func()) (func(), error) {
 	sub, err := c.c.Subscribe(toplevel, device)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	c.wg.Add(1)
+	cancel := make(chan struct{}, 1)
 	go func() {
 		defer c.wg.Done()
-		for m := range sub.C {
-			if str, ok := m.Value.Value.(string); ok && str == value {
-				callback()
+		defer sub.Unsubscribe()
+
+		for {
+			select {
+			case <-cancel:
+				return
+			case m := <-sub.C:
+				if str, ok := m.Value.Value.(string); ok && str == value {
+					callback()
+				}
 			}
 		}
 	}()
-	return nil
+	return func() {
+		close(cancel)
+	}, nil
 }

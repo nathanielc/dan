@@ -12,7 +12,8 @@ time                = ( digit ) ":" ( digit ) ( "AM" | "PM" ) .
 Program           = { ProgramStatement | BlockStatement } .
 Block             = "{" { BlockStatement } "}"  | BlockStatement .
 ProgramStatement  = SceneStatement .
-BlockStatement    = SetStatement | GetStatement | VarStatement | AtStatement | WhenStatement .
+BlockStatement    = SetStatement | GetStatement | VarStatement | AtStatement | WhenStatement 
+                        StartStatement | StopStatement .
 SetStatement      = "set" PathMatch Value .
 VarStatement      = "var" word "=" GetStatement .
 GetStatement      = "get" PathMatch .
@@ -22,4 +23,6 @@ Time              = { digit } ":" { digit } ( "AM" | "PM" )
 Action            = ( "start" | "stop" )
 WhenStatement     = "when" PathMatch "is" Value "wait" duration Block  | "when" PathMatch "is" Value Block .
 PathMatch         = "$" | { ( word | "*" ) "/" } ( word | "*" ) .
+StartStatement    = "start" word .
+StopStatement     = "stop" word .
 ```

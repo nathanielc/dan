@@ -151,8 +151,12 @@ func (p *parser) blockStatement() Node {
 		return p.atStatement()
 	case TokenWhen:
 		return p.whenStatement()
+	case TokenStart:
+		return p.startStatement()
+	case TokenStop:
+		return p.stopStatement()
 	default:
-		p.unexpected(p.next(), TokenSet, TokenVar, TokenAt, TokenWhen)
+		p.unexpected(p.next(), TokenSet, TokenVar, TokenAt, TokenWhen, TokenStart, TokenStop)
 		return nil
 	}
 }
@@ -291,13 +295,11 @@ func (p *parser) getStatement() *GetStatementNode {
 func (p *parser) atStatement() *AtStatementNode {
 	t := p.expect(TokenAt)
 	tm := p.time()
-	a := p.action()
-	w := p.expect(TokenWord)
+	b := p.block()
 	return &AtStatementNode{
-		Position:   t.Pos,
-		Time:       tm,
-		Action:     a,
-		Identifier: w,
+		Position: t.Pos,
+		Time:     tm,
+		Block:    b,
 	}
 }
 
@@ -348,20 +350,6 @@ func (p *parser) time() *TimeNode {
 	return tm
 }
 
-func (p *parser) action() *ActionNode {
-	switch p.peek().Type {
-	case TokenStart, TokenStop:
-		t := p.next()
-		return &ActionNode{
-			Position: t.Pos,
-			Action:   t.Value,
-		}
-	default:
-		p.unexpected(p.next(), TokenStart, TokenStop)
-		return nil
-	}
-}
-
 func (p *parser) whenStatement() *WhenStatementNode {
 	t := p.expect(TokenWhen)
 	pm := p.pathMatch()
@@ -379,6 +367,22 @@ func (p *parser) whenStatement() *WhenStatementNode {
 		IsValue:      v,
 		WaitDuration: d,
 		Block:        b,
+	}
+}
+func (p *parser) startStatement() *StartStatementNode {
+	t := p.expect(TokenStart)
+	w := p.expect(TokenWord)
+	return &StartStatementNode{
+		Position:   t.Pos,
+		Identifier: w,
+	}
+}
+func (p *parser) stopStatement() *StopStatementNode {
+	t := p.expect(TokenStop)
+	w := p.expect(TokenWord)
+	return &StopStatementNode{
+		Position:   t.Pos,
+		Identifier: w,
 	}
 }
 

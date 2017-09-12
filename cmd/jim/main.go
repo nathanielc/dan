@@ -2,24 +2,28 @@ package main
 
 import (
 	"bufio"
+	"flag"
 	"fmt"
 	"log"
 	"os"
 
 	"github.com/nathanielc/jim/dsl"
-	"github.com/nathanielc/jim/dsl/repl"
+	"github.com/nathanielc/jim/dsl/eval"
 	"github.com/nathanielc/jim/smartmqtt"
 )
 
-func main() {
+var mqttURL = flag.String("mqtt", "tcp://localhost:1883", "URL of the MQTT broker")
 
-	server, err := smartmqtt.New()
+func main() {
+	flag.Parse()
+
+	server, err := smartmqtt.New(*mqttURL)
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	scanner := bufio.NewScanner(os.Stdin)
-	e := repl.NewEvaluator(server)
+	e := eval.New(server)
 	for scanner.Scan() {
 		ast, err := dsl.Parse(scanner.Text())
 		r, err := e.Eval(ast)

@@ -64,9 +64,8 @@ type GetStatementNode struct {
 
 type AtStatementNode struct {
 	Position
-	Time       *TimeNode
-	Action     *ActionNode
-	Identifier Token
+	Time  *TimeNode
+	Block *BlockNode
 }
 
 type TimeNode struct {
@@ -75,11 +74,6 @@ type TimeNode struct {
 	Minute  int
 	AM      bool
 	Literal string
-}
-
-type ActionNode struct {
-	Position
-	Action string
 }
 
 type WhenStatementNode struct {
@@ -94,4 +88,13 @@ type DurationNode struct {
 	Position
 	Duration time.Duration
 	Literal  string
+}
+
+type StartStatementNode struct {
+	Position
+	Identifier Token
+}
+type StopStatementNode struct {
+	Position
+	Identifier Token
 }

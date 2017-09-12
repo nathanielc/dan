@@ -13,7 +13,7 @@ func TestParser(t *testing.T) {
 		input string
 		ast   dsl.AST
 	}{
-		"set statement": {
+		"set_statement": {
 			input: "set masterbedroom/lights off",
 			ast: &dsl.ProgramNode{
 				Position: dsl.Position{Line: 1, Char: 1},
@@ -33,7 +33,7 @@ func TestParser(t *testing.T) {
 				},
 			},
 		},
-		"var statement": {
+		"var_statement": {
 			input: "var x = get masterbedroom/lights",
 			ast: &dsl.ProgramNode{
 				Position: dsl.Position{Line: 1, Char: 1},
@@ -56,7 +56,7 @@ func TestParser(t *testing.T) {
 				},
 			},
 		},
-		"at statement": {
+		"at_statement": {
 			input: "at 10:00 AM start workout",
 			ast: &dsl.ProgramNode{
 				Position: dsl.Position{Line: 1, Char: 1},
@@ -70,20 +70,24 @@ func TestParser(t *testing.T) {
 							AM:       true,
 							Literal:  "10:00",
 						},
-						Action: &dsl.ActionNode{
+						Block: &dsl.BlockNode{
 							Position: dsl.Position{Line: 1, Char: 13},
-							Action:   "start",
-						},
-						Identifier: dsl.Token{
-							Pos:   dsl.Position{Line: 1, Char: 19},
-							Type:  dsl.TokenWord,
-							Value: "workout",
+							Statements: []dsl.Node{
+								&dsl.StartStatementNode{
+									Position: dsl.Position{Line: 1, Char: 13},
+									Identifier: dsl.Token{
+										Pos:   dsl.Position{Line: 1, Char: 19},
+										Type:  dsl.TokenWord,
+										Value: "workout",
+									},
+								},
+							},
 						},
 					},
 				},
 			},
 		},
-		"when statement": {
+		"when_statement": {
 			input: `
 when
 	*/doors is unlocked
@@ -130,7 +134,7 @@ wait 5m
 				},
 			},
 		},
-		"scene statement": {
+		"scene_statement": {
 			input: `
 scene nightime {
 	set */light off
@@ -227,6 +231,38 @@ scene nightime {
 									},
 								},
 							},
+						},
+					},
+				},
+			},
+		},
+		"stop_statement": {
+			input: "stop nightime",
+			ast: &dsl.ProgramNode{
+				Position: dsl.Position{Line: 1, Char: 1},
+				Statements: []dsl.Node{
+					&dsl.StopStatementNode{
+						Position: dsl.Position{Line: 1, Char: 1},
+						Identifier: dsl.Token{
+							Pos:   dsl.Position{Line: 1, Char: 6},
+							Type:  dsl.TokenWord,
+							Value: "nightime",
+						},
+					},
+				},
+			},
+		},
+		"start_statement": {
+			input: "start nightime",
+			ast: &dsl.ProgramNode{
+				Position: dsl.Position{Line: 1, Char: 1},
+				Statements: []dsl.Node{
+					&dsl.StartStatementNode{
+						Position: dsl.Position{Line: 1, Char: 1},
+						Identifier: dsl.Token{
+							Pos:   dsl.Position{Line: 1, Char: 7},
+							Type:  dsl.TokenWord,
+							Value: "nightime",
 						},
 					},
 				},
