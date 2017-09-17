@@ -17,7 +17,7 @@ var mqttURL = flag.String("mqtt", "tcp://localhost:1883", "URL of the MQTT broke
 func main() {
 	flag.Parse()
 
-	server, err := smartmqtt.New(*mqttURL)
+	server, err := smartmqtt.New(*mqttURL, "jim-cli")
 	if err != nil {
 		log.Fatal(err)
 	}

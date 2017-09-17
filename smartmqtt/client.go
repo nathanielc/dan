@@ -20,10 +20,10 @@ type client struct {
 	wg sync.WaitGroup
 }
 
-func New(u string) (Client, error) {
+func New(u, name string) (Client, error) {
 	opts := smarthome.DefaultMQTTClientOptions()
 	opts.AddBroker(u)
-	opts.SetClientID("jim-smartmqtt")
+	opts.SetClientID(name)
 	c, err := smarthome.NewClient(opts)
 	if err != nil {
 		return nil, err
