@@ -1,15 +1,15 @@
 package main
 
 import (
-	"bufio"
 	"flag"
 	"fmt"
 	"log"
-	"os"
 
+	"github.com/chzyer/readline"
 	"github.com/nathanielc/jim/dsl"
 	"github.com/nathanielc/jim/dsl/eval"
 	"github.com/nathanielc/jim/smartmqtt"
+	"github.com/nathanielc/smarthome"
 )
 
 var mqttURL = flag.String("mqtt", "tcp://localhost:1883", "URL of the MQTT broker")
@@ -17,15 +17,30 @@ var mqttURL = flag.String("mqtt", "tcp://localhost:1883", "URL of the MQTT broke
 func main() {
 	flag.Parse()
 
-	server, err := smartmqtt.New(*mqttURL, "jim-cli")
+	opts := smarthome.DefaultMQTTClientOptions()
+	opts.AddBroker(*mqttURL)
+	opts.SetCleanSession(true)
+	server, err := smartmqtt.New(opts)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	scanner := bufio.NewScanner(os.Stdin)
+	rl, err := readline.NewEx(&readline.Config{
+		Prompt:      "> ",
+		HistoryFile: "/tmp/jim.history",
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer rl.Close()
+
 	e := eval.New(server)
-	for scanner.Scan() {
-		ast, err := dsl.Parse(scanner.Text())
+	for {
+		line, err := rl.Readline()
+		if err != nil {
+			break
+		}
+		ast, err := dsl.Parse(line)
 		r, err := e.Eval(ast)
 		if err != nil {
 			fmt.Println("E", err)

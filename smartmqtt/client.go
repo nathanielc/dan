@@ -3,6 +3,7 @@ package smartmqtt
 import (
 	"sync"
 
+	mqtt "github.com/eclipse/paho.mqtt.golang"
 	"github.com/nathanielc/smarthome"
 )
 
@@ -20,10 +21,7 @@ type client struct {
 	wg sync.WaitGroup
 }
 
-func New(u, name string) (Client, error) {
-	opts := smarthome.DefaultMQTTClientOptions()
-	opts.AddBroker(u)
-	opts.SetClientID(name)
+func New(opts *mqtt.ClientOptions) (Client, error) {
 	c, err := smarthome.NewClient(opts)
 	if err != nil {
 		return nil, err

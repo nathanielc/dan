@@ -13,16 +13,21 @@ import (
 	"github.com/nathanielc/jim/dsl"
 	"github.com/nathanielc/jim/dsl/eval"
 	"github.com/nathanielc/jim/smartmqtt"
+	"github.com/nathanielc/smarthome"
 	"github.com/pkg/errors"
 )
 
 var dir = flag.String("dir", "jim.d", "Directory containing the jim scripts")
 var mqttURL = flag.String("mqtt", "tcp://localhost:1883", "URL of the MQTT broker")
+var clientID = flag.String("client-id", "jimd", "Unique ID for this MQTT client")
 
 func main() {
 	flag.Parse()
 
-	server, err := smartmqtt.New(*mqttURL, "jim-daemon")
+	opts := smarthome.DefaultMQTTClientOptions()
+	opts.AddBroker(*mqttURL)
+	opts.SetClientID(*clientID)
+	server, err := smartmqtt.New(opts)
 	if err != nil {
 		log.Fatal(err)
 	}

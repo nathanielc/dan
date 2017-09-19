@@ -2,6 +2,12 @@
 
 
 [[projects]]
+  name = "github.com/chzyer/readline"
+  packages = ["."]
+  revision = "62c6fe6193755f722b8b8788aa7357be55a50ff1"
+  version = "v1.4"
+
+[[projects]]
   branch = "master"
   name = "github.com/davecheney/gpio"
   packages = ["."]
@@ -46,6 +52,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "65a1f511ffc0497291b3328887cde10c48322a45a2581eb0ee90a1dc7861f876"
+  inputs-digest = "f141405fc9d013ad6e49564b40378dffaacfa342089700fc2934096e87ddc737"
   solver-name = "gps-cdcl"
   solver-version = 1
