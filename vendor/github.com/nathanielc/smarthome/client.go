@@ -26,7 +26,8 @@ type Client interface {
 }
 
 type client struct {
-	c mqtt.Client
+	c          mqtt.Client
+	disconnect bool
 
 	wg      sync.WaitGroup
 	closing chan struct{}
@@ -40,8 +41,13 @@ func NewClient(opts *mqtt.ClientOptions) (Client, error) {
 	if token := c.Connect(); token.Wait() && token.Error() != nil {
 		return nil, token.Error()
 	}
+	return newClient(c, true)
+}
+
+func newClient(c mqtt.Client, disconnect bool) (Client, error) {
 	cli := &client{
 		c:              c,
+		disconnect:     disconnect,
 		closing:        make(chan struct{}),
 		subUpdates:     make(chan subUpdate),
 		statusMessages: make(chan mqtt.Message, 100),
@@ -193,6 +199,9 @@ func (c *client) doSubs() {
 func (c *client) Close() {
 	close(c.closing)
 	c.wg.Wait()
+	if c.disconnect {
+		c.c.Disconnect(defaultDisconnectQuiesce)
+	}
 }
 
 type subUpdate struct {

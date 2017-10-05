@@ -201,23 +201,57 @@ func (p *parser) setStatement() *SetStatementNode {
 	}
 }
 
+func (p *parser) path() *PathNode {
+	pn := &PathNode{
+		Position: p.peek().Pos,
+		Path:     "",
+	}
+	if p.peek().Type == TokenDollar {
+		p.next()
+		pn.Path = "$"
+		return pn
+	}
+	for {
+		switch p.peek().Type {
+		case TokenWord:
+			t := p.next()
+			pn.Path = path.Join(pn.Path, t.Value)
+		default:
+			if pn.Path == "" {
+				p.unexpected(p.next(), TokenWord)
+				return nil
+			}
+			return pn
+		}
+		if p.peek().Type != TokenPathSeparator {
+			return pn
+		}
+		p.next()
+	}
+}
+
 func (p *parser) pathMatch() *PathMatchNode {
 	pm := &PathMatchNode{
 		Position: p.peek().Pos,
 		Path:     "",
 	}
+	if p.peek().Type == TokenDollar {
+		p.next()
+		pm.Path = "$"
+		return pm
+	}
 	for {
 		switch p.peek().Type {
-		case TokenDollar:
-			p.next()
-			pm.Path = "$"
-			return pm
-		case TokenStar, TokenWord:
+		case TokenPlus, TokenWord:
 			t := p.next()
 			pm.Path = path.Join(pm.Path, t.Value)
+		case TokenHash:
+			t := p.next()
+			pm.Path = path.Join(pm.Path, t.Value)
+			return pm
 		default:
 			if pm.Path == "" {
-				p.unexpected(p.next(), TokenStar, TokenWord)
+				p.unexpected(p.next(), TokenPlus, TokenWord, TokenHash)
 				return nil
 			}
 			return pm
@@ -285,10 +319,10 @@ func (p *parser) varStatement() *VarStatementNode {
 
 func (p *parser) getStatement() *GetStatementNode {
 	t := p.expect(TokenGet)
-	pm := p.pathMatch()
+	pn := p.path()
 	return &GetStatementNode{
 		Position: t.Pos,
-		Path:     pm,
+		Path:     pn,
 	}
 }
 
@@ -304,50 +338,64 @@ func (p *parser) atStatement() *AtStatementNode {
 }
 
 func (p *parser) time() *TimeNode {
-	t := p.expect(TokenTime)
-	// Parse time literal
-	parts := strings.Split(t.Value, ":")
-	if len(parts) != 2 {
-		p.errorf("unexpected time literal %q", t.Value)
-		return nil
-	}
-	h, err := strconv.Atoi(parts[0])
-	if err != nil {
-		p.error(err)
-		return nil
-	}
-	m, err := strconv.Atoi(parts[1])
-	if err != nil {
-		p.error(err)
-		return nil
-	}
-	if h < 0 || h > 12 {
-		p.errorf("hour must be between 0 and 12")
-		return nil
-	}
-	if m < 0 || m > 59 {
-		p.errorf("minute must be between 0 and 59")
-		return nil
-	}
-
-	tm := &TimeNode{
-		Position: t.Pos,
-		Literal:  t.Value,
-		Hour:     h,
-		Minute:   m,
-	}
 	switch p.peek().Type {
-	case TokenAM:
-		p.next()
-		tm.AM = true
-	case TokenPM:
-		p.next()
-		tm.AM = false
+	case TokenTime:
+		t := p.next()
+		// Parse time literal
+		parts := strings.Split(t.Value, ":")
+		if len(parts) != 2 {
+			p.errorf("unexpected time literal %q", t.Value)
+			return nil
+		}
+		h, err := strconv.Atoi(parts[0])
+		if err != nil {
+			p.error(err)
+			return nil
+		}
+		m, err := strconv.Atoi(parts[1])
+		if err != nil {
+			p.error(err)
+			return nil
+		}
+		if h < 0 || h > 12 {
+			p.errorf("hour must be between 0 and 12")
+			return nil
+		}
+		if m < 0 || m > 59 {
+			p.errorf("minute must be between 0 and 59")
+			return nil
+		}
+
+		tm := &TimeNode{
+			Position: t.Pos,
+			Literal:  t.Value,
+			Hour:     h,
+			Minute:   m,
+		}
+		switch p.peek().Type {
+		case TokenAM:
+			p.next()
+			tm.AM = true
+		case TokenPM:
+			p.next()
+			tm.AM = false
+		default:
+			p.unexpected(p.next(), TokenAM, TokenPM)
+			return nil
+		}
+		return tm
+	case TokenWord:
+		t := p.next()
+		tm := &TimeNode{
+			Position: t.Pos,
+			Literal:  t.Value,
+			Keyword:  true,
+		}
+		return tm
 	default:
-		p.unexpected(p.next(), TokenAM, TokenPM)
+		p.unexpected(p.next(), TokenTime, TokenWord)
 		return nil
 	}
-	return tm
 }
 
 func (p *parser) whenStatement() *WhenStatementNode {

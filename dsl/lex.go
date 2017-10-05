@@ -40,7 +40,8 @@ const (
 	TokenDuration
 	TokenTime
 	TokenAsign
-	TokenStar
+	TokenHash
+	TokenPlus
 	TokenPathSeparator
 	TokenDollar
 
@@ -92,8 +93,10 @@ func (tt TokenType) String() string {
 		return "time"
 	case TokenAsign:
 		return "asign"
-	case TokenStar:
-		return "star"
+	case TokenHash:
+		return "hash"
+	case TokenPlus:
+		return "plus"
 	case TokenPathSeparator:
 		return "pathseparator"
 	case TokenDollar:
@@ -264,8 +267,10 @@ func lexToken(l *lexer) stateFn {
 			return lexNumberOrTimeOrDuration
 		case r == '/':
 			l.emit(TokenPathSeparator)
-		case r == '*':
-			l.emit(TokenStar)
+		case r == '#':
+			l.emit(TokenHash)
+		case r == '+':
+			l.emit(TokenPlus)
 		case r == '=':
 			l.emit(TokenAsign)
 		case r == '$':

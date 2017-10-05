@@ -58,7 +58,7 @@ type ClientOptions struct {
 	MaxReconnectInterval    time.Duration
 	AutoReconnect           bool
 	Store                   Store
-	DefaultPublishHander    MessageHandler
+	DefaultPublishHandler   MessageHandler
 	OnConnect               OnConnectHandler
 	OnConnectionLost        ConnectionLostHandler
 	WriteTimeout            time.Duration
@@ -109,8 +109,10 @@ func NewClientOptions() *ClientOptions {
 // Where "scheme" is one of "tcp", "ssl", or "ws", "host" is the ip-address (or hostname)
 // and "port" is the port on which the broker is accepting connections.
 func (o *ClientOptions) AddBroker(server string) *ClientOptions {
-	brokerURI, _ := url.Parse(server)
-	o.Servers = append(o.Servers, brokerURI)
+	brokerURI, err := url.Parse(server)
+	if err == nil {
+		o.Servers = append(o.Servers, brokerURI)
+	}
 	return o
 }
 
@@ -233,7 +235,7 @@ func (o *ClientOptions) SetBinaryWill(topic string, payload []byte, qos byte, re
 // SetDefaultPublishHandler sets the MessageHandler that will be called when a message
 // is received that does not match any known subscriptions.
 func (o *ClientOptions) SetDefaultPublishHandler(defaultHandler MessageHandler) *ClientOptions {
-	o.DefaultPublishHander = defaultHandler
+	o.DefaultPublishHandler = defaultHandler
 	return o
 }
 

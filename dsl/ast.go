@@ -40,6 +40,11 @@ type PathMatchNode struct {
 	Path string
 }
 
+type PathNode struct {
+	Position
+	Path string
+}
+
 type SceneStatementNode struct {
 	Position
 	Identifier Token
@@ -59,7 +64,7 @@ type VarStatementNode struct {
 
 type GetStatementNode struct {
 	Position
-	Path *PathMatchNode
+	Path *PathNode
 }
 
 type AtStatementNode struct {
@@ -73,6 +78,7 @@ type TimeNode struct {
 	Hour    int
 	Minute  int
 	AM      bool
+	Keyword bool
 	Literal string
 }
 

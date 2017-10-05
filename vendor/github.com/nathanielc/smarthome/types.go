@@ -8,11 +8,11 @@ import (
 )
 
 const (
-	setPath     = "set"
-	getPath     = "get"
-	commandPath = "command"
-	statusPath  = "status"
-	connectPath = "connect"
+	setPath       = "set"
+	getPath       = "get"
+	commandPath   = "command"
+	statusPath    = "status"
+	connectedPath = "connected"
 
 	statusPathComplete = "/" + statusPath + "/"
 )

@@ -47,7 +47,7 @@ func TestParser(t *testing.T) {
 						},
 						Get: &dsl.GetStatementNode{
 							Position: dsl.Position{Line: 1, Char: 9},
-							Path: &dsl.PathMatchNode{
+							Path: &dsl.PathNode{
 								Position: dsl.Position{Line: 1, Char: 13},
 								Path:     "masterbedroom/lights",
 							},
@@ -90,7 +90,7 @@ func TestParser(t *testing.T) {
 		"when_statement": {
 			input: `
 when
-	*/doors is unlocked
+	+/doors is unlocked
 wait 5m
 	set $ locked
 `,
@@ -101,7 +101,7 @@ wait 5m
 						Position: dsl.Position{Line: 2, Char: 1},
 						Path: &dsl.PathMatchNode{
 							Position: dsl.Position{Line: 3, Char: 2},
-							Path:     "*/doors",
+							Path:     "+/doors",
 						},
 						IsValue: &dsl.ValueNode{
 							Position: dsl.Position{Line: 3, Char: 13},
@@ -137,12 +137,12 @@ wait 5m
 		"scene_statement": {
 			input: `
 scene nightime {
-	set */light off
-	set */door locked
+	set +/light off
+	set +/door locked
 	set porch/light on
 
 	when
-		*/door is unlocked
+		+/door is unlocked
 	wait 5m
 		 set $ locked
 }
@@ -164,7 +164,7 @@ scene nightime {
 									Position: dsl.Position{Line: 3, Char: 2},
 									DeviceMatch: &dsl.PathMatchNode{
 										Position: dsl.Position{Line: 3, Char: 6},
-										Path:     "*/light",
+										Path:     "+/light",
 									},
 									Value: &dsl.ValueNode{
 										Position: dsl.Position{Line: 3, Char: 14},
@@ -176,7 +176,7 @@ scene nightime {
 									Position: dsl.Position{Line: 4, Char: 2},
 									DeviceMatch: &dsl.PathMatchNode{
 										Position: dsl.Position{Line: 4, Char: 6},
-										Path:     "*/door",
+										Path:     "+/door",
 									},
 									Value: &dsl.ValueNode{
 										Position: dsl.Position{Line: 4, Char: 13},
@@ -200,7 +200,7 @@ scene nightime {
 									Position: dsl.Position{Line: 7, Char: 2},
 									Path: &dsl.PathMatchNode{
 										Position: dsl.Position{Line: 8, Char: 3},
-										Path:     "*/door",
+										Path:     "+/door",
 									},
 									IsValue: &dsl.ValueNode{
 										Position: dsl.Position{Line: 8, Char: 13},

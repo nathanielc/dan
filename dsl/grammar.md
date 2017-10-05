@@ -16,13 +16,14 @@ BlockStatement    = SetStatement | GetStatement | VarStatement | AtStatement | W
                         StartStatement | StopStatement .
 SetStatement      = "set" PathMatch Value .
 VarStatement      = "var" word "=" GetStatement .
-GetStatement      = "get" PathMatch .
+GetStatement      = "get" Path .
 SceneStatement    = "scene" word Block .
 AtStatement       = "at" Time Action word .
-Time              = { digit } ":" { digit } ( "AM" | "PM" )
+Time              = word | { digit } ":" { digit } ( "AM" | "PM" )
 Action            = ( "start" | "stop" )
 WhenStatement     = "when" PathMatch "is" Value "wait" duration Block  | "when" PathMatch "is" Value Block .
-PathMatch         = "$" | { ( word | "*" ) "/" } ( word | "*" ) .
+Path              = "$" | { word "/" } word .
+PathMatch         = "$" | { ( word | "+" ) "/" } ( word | "+"  | "#" ) .
 StartStatement    = "start" word .
 StopStatement     = "stop" word .
 ```

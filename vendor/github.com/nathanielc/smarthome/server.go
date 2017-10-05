@@ -42,6 +42,11 @@ type Server interface {
 	PublishStatus(item string, value Value) error
 	// Publish a one-shot message.
 	PublishOneShotStatus(item string, value Value) error
+
+	// Client returns a client that shares the underlying MQTT connection.
+	// The server must be connected before calling.
+	// Closing the client is required but will not disconnect the underlying MQTT connection.
+	Client() (Client, error)
 }
 
 type server struct {
@@ -62,7 +67,7 @@ type server struct {
 }
 
 func NewServer(toplevel string, h Handler, opts *mqtt.ClientOptions) Server {
-	ct := path.Join(toplevel, connectPath)
+	ct := path.Join(toplevel, connectedPath)
 	// Setup Will
 	opts.SetWill(ct, "0", 0, false)
 
@@ -160,4 +165,8 @@ func (s *server) publishStatus(item string, value Value, oneshot bool) error {
 	token := s.c.Publish(path.Join(s.statusTopic, item), 0, !oneshot, payload)
 	token.Wait()
 	return token.Error()
+}
+
+func (s *server) Client() (Client, error) {
+	return newClient(s.c, false)
 }

@@ -4,26 +4,19 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"strings"
 
 	"github.com/chzyer/readline"
 	"github.com/nathanielc/jim/dsl"
 	"github.com/nathanielc/jim/dsl/eval"
-	"github.com/nathanielc/jim/smartmqtt"
-	"github.com/nathanielc/smarthome"
 )
 
 var mqttURL = flag.String("mqtt", "tcp://localhost:1883", "URL of the MQTT broker")
+var lat = flag.Float64("lat", 0, "Latitude, used for sun relative times")
+var lon = flag.Float64("lon", 0, "Longitude, used for sun relative times")
 
 func main() {
 	flag.Parse()
-
-	opts := smarthome.DefaultMQTTClientOptions()
-	opts.AddBroker(*mqttURL)
-	opts.SetCleanSession(true)
-	server, err := smartmqtt.New(opts)
-	if err != nil {
-		log.Fatal(err)
-	}
 
 	rl, err := readline.NewEx(&readline.Config{
 		Prompt:      "> ",
@@ -34,11 +27,30 @@ func main() {
 	}
 	defer rl.Close()
 
-	e := eval.New(server)
+	conf := eval.DefaultConfig()
+	conf.ClientOnly = true
+	conf.MQTT.AddBroker(*mqttURL)
+	conf.MQTT.SetCleanSession(true)
+	conf.Latitude = *lat
+	conf.Longitude = *lon
+	e, err := eval.New(conf)
+	if err != nil {
+		log.Fatal(err)
+	}
 	for {
 		line, err := rl.Readline()
 		if err != nil {
 			break
+		}
+		if strings.TrimSpace(line) == "upcoming" {
+			events := e.Upcoming()
+			if len(events) > 0 {
+				fmt.Println("Time\t\t\t\tDescription")
+				for _, e := range events {
+					fmt.Printf("%s\t%s\n", e.Time, e.Description)
+				}
+			}
+			continue
 		}
 		ast, err := dsl.Parse(line)
 		r, err := e.Eval(ast)

@@ -7,32 +7,78 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cpucycle/astrotime"
 	"github.com/nathanielc/jim/dsl"
-	"github.com/nathanielc/jim/smartmqtt"
+	jfmt "github.com/nathanielc/jim/dsl/fmt"
+	"github.com/nathanielc/smarthome"
 )
 
 type Result interface {
 	String() string
 }
+
 type Evaluator struct {
-	c           smartmqtt.Client
+	c           Client
+	server      smarthome.Server
 	scenes      map[string]*sceneState
 	globalScene *sceneState
+
+	cfg Config
+
+	sched *schedule
 
 	mu sync.Mutex
 }
 
-func New(c smartmqtt.Client) *Evaluator {
-	return &Evaluator{
-		c:           c,
+func New(cfg Config) (e *Evaluator, err error) {
+	e = &Evaluator{
+		cfg:         cfg,
 		scenes:      make(map[string]*sceneState),
 		globalScene: new(sceneState),
+		sched:       newSchedule(),
+	}
+	var cli smarthome.Client
+	if !cfg.ClientOnly {
+		e.server = smarthome.NewServer(cfg.TopLevel, e, cfg.MQTT)
+		err = e.server.Connect()
+		if err != nil {
+			return
+		}
+		e.server.PublishHWStatus(smarthome.Connected)
+
+		cli, err = e.server.Client()
+		if err != nil {
+			return
+		}
+	} else {
+		cli, err = smarthome.NewClient(cfg.MQTT)
+		if err != nil {
+			return
+		}
+	}
+	e.c = &client{
+		c: cli,
+	}
+	return
+}
+
+func (e *Evaluator) Close() {
+	e.sched.Close()
+	e.c.Close()
+	if e.server != nil {
+		e.server.Disconnect()
 	}
 }
 
 func (e *Evaluator) Eval(ast dsl.AST) (Result, error) {
 	return e.eval(e.globalScene, ast)
 }
+
+func (e *Evaluator) Upcoming() []Event {
+	n := time.Now()
+	return e.sched.Upcoming(n)
+}
+
 func (e *Evaluator) eval(scene *sceneState, node dsl.Node) (Result, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -64,18 +110,43 @@ func (e *Evaluator) evalWithLock(scene *sceneState, node dsl.Node) (Result, erro
 	}
 }
 func (e *Evaluator) evalAt(scene *sceneState, n *dsl.AtStatementNode) (Result, error) {
-	hour := n.Time.Hour
-	if !n.Time.AM {
-		hour += 12
+	callback := func(time.Time) {
+		e.eval(scene, n.Block)
+	}
+	var t timer
+	if n.Time.Keyword {
+		st := sunTimer{
+			lat: e.cfg.Latitude,
+			lon: e.cfg.Longitude,
+		}
+		switch n.Time.Literal {
+		case "sunrise":
+			st.nextF = astrotime.NextSunrise
+		case "sunset":
+			st.nextF = astrotime.NextSunset
+		default:
+			return nil, fmt.Errorf("unknown time word %q", n.Time.Literal)
+		}
+		t = st
+	} else {
+		hour := n.Time.Hour
+		if !n.Time.AM {
+			hour += 12
+		}
+		var err error
+		t, err = e.sched.DailyTimer(hour, n.Time.Minute)
+		if err != nil {
+			return nil, err
+		}
 	}
 
-	cancel, err := scheduleDaily(hour, n.Time.Minute, func(time.Time) {
-		e.eval(scene, n.Block)
-	})
+	desc := jfmt.Format(n.Block)
+	cancel, err := e.sched.Add(t, desc, callback)
 	if err != nil {
 		return nil, err
 	}
 	scene.cancel = append(scene.cancel, cancel)
+
 	return nil, nil
 }
 
@@ -155,6 +226,18 @@ func (e *Evaluator) evalWhen(scene *sceneState, w *dsl.WhenStatementNode) (Resul
 		scene.cancel = append(scene.cancel, cancel)
 	}
 	return nil, nil
+}
+
+func (e *Evaluator) Set(toplevel string, item string, value interface{}) {
+	panic("not implemented")
+}
+
+func (e *Evaluator) Get(toplevel string, item string) (smarthome.Value, bool) {
+	panic("not implemented")
+}
+
+func (e *Evaluator) Command(toplevel string, cmd []byte) {
+	panic("not implemented")
 }
 
 type result struct {

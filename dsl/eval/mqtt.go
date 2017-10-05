@@ -1,18 +1,16 @@
-package smartmqtt
+package eval
 
 import (
 	"sync"
 
-	mqtt "github.com/eclipse/paho.mqtt.golang"
 	"github.com/nathanielc/smarthome"
 )
 
-type Value smarthome.Value
-
 type Client interface {
 	Set(toplevel, device, value string) error
-	Get(toplevel, device string) (Value, error)
+	Get(toplevel, device string) (smarthome.Value, error)
 	When(toplevel, device, value string, callback func()) (func(), error)
+	Close()
 }
 
 type client struct {
@@ -21,26 +19,20 @@ type client struct {
 	wg sync.WaitGroup
 }
 
-func New(opts *mqtt.ClientOptions) (Client, error) {
-	c, err := smarthome.NewClient(opts)
-	if err != nil {
-		return nil, err
-	}
-	return &client{
-		c: c,
-	}, nil
+func (c *client) Close() {
+	c.c.Close()
 }
 
 func (c *client) Set(toplevel, device, value string) error {
 	return c.c.Set(toplevel, device, value)
 }
 
-func (c *client) Get(toplevel, device string) (Value, error) {
+func (c *client) Get(toplevel, device string) (smarthome.Value, error) {
 	v, err := c.c.Get(toplevel, device)
 	if err != nil {
-		return Value{}, err
+		return smarthome.Value{}, err
 	}
-	return Value(v), nil
+	return smarthome.Value(v), nil
 }
 
 func (c *client) When(toplevel, device, value string, callback func()) (func(), error) {
