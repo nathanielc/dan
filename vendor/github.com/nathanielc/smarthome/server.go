@@ -168,5 +168,5 @@ func (s *server) publishStatus(item string, value Value, oneshot bool) error {
 }
 
 func (s *server) Client() (Client, error) {
-	return newClient(s.c, false)
+	return newClient(s.c, false), nil
 }

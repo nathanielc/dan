@@ -41,7 +41,7 @@
   branch = "master"
   name = "github.com/nathanielc/smarthome"
   packages = ["."]
-  revision = "29dd06f51225e6a5297827eb90051db1afea6375"
+  revision = "6c5a9549c75fb0d95b249ade5c994b8b177050a8"
 
 [[projects]]
   name = "github.com/pkg/errors"

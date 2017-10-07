@@ -62,12 +62,12 @@ func TestLexer(t *testing.T) {
 			},
 		},
 		"path-match": {
-			input: "+/p1/#",
+			input: "*/p1/**",
 			tokens: []dsl.Token{
 				{
 					Pos:   dsl.Position{Line: 1, Char: 1},
-					Type:  dsl.TokenPlus,
-					Value: "+",
+					Type:  dsl.TokenStar,
+					Value: "*",
 				},
 				{
 					Pos:   dsl.Position{Line: 1, Char: 2},
@@ -86,8 +86,13 @@ func TestLexer(t *testing.T) {
 				},
 				{
 					Pos:   dsl.Position{Line: 1, Char: 6},
-					Type:  dsl.TokenHash,
-					Value: "#",
+					Type:  dsl.TokenStar,
+					Value: "*",
+				},
+				{
+					Pos:   dsl.Position{Line: 1, Char: 7},
+					Type:  dsl.TokenStar,
+					Value: "*",
 				},
 			},
 		},

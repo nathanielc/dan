@@ -18,10 +18,11 @@ type Result interface {
 }
 
 type Evaluator struct {
-	c           Client
-	server      smarthome.Server
-	scenes      map[string]*sceneState
-	globalScene *sceneState
+	c            Client
+	server       smarthome.Server
+	deviceLookup smarthome.DeviceLookup
+	scenes       map[string]*sceneState
+	globalScene  *sceneState
 
 	cfg Config
 
@@ -56,9 +57,7 @@ func New(cfg Config) (e *Evaluator, err error) {
 			return
 		}
 	}
-	e.c = &client{
-		c: cli,
-	}
+	e.c, err = newClient(cli)
 	return
 }
 

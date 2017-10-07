@@ -26,14 +26,14 @@ type Client interface {
 }
 
 type client struct {
+	mu         sync.Mutex
 	c          mqtt.Client
 	disconnect bool
 
-	wg      sync.WaitGroup
+	closed  bool
 	closing chan struct{}
 
-	subUpdates     chan subUpdate
-	statusMessages chan mqtt.Message
+	subs map[string]*subscription
 }
 
 func NewClient(opts *mqtt.ClientOptions) (Client, error) {
@@ -41,28 +41,16 @@ func NewClient(opts *mqtt.ClientOptions) (Client, error) {
 	if token := c.Connect(); token.Wait() && token.Error() != nil {
 		return nil, token.Error()
 	}
-	return newClient(c, true)
+	return newClient(c, true), nil
 }
 
-func newClient(c mqtt.Client, disconnect bool) (Client, error) {
-	cli := &client{
-		c:              c,
-		disconnect:     disconnect,
-		closing:        make(chan struct{}),
-		subUpdates:     make(chan subUpdate),
-		statusMessages: make(chan mqtt.Message, 100),
+func newClient(c mqtt.Client, disconnect bool) Client {
+	return &client{
+		c:          c,
+		disconnect: disconnect,
+		closing:    make(chan struct{}),
+		subs:       make(map[string]*subscription),
 	}
-	statusTopic := path.Join("+", statusPath, "#")
-	if token := c.Subscribe(statusTopic, 0, cli.handleStatusMessage); token.Wait() && token.Error() != nil {
-		return nil, token.Error()
-	}
-
-	cli.wg.Add(1)
-	go func() {
-		defer cli.wg.Done()
-		cli.doSubs()
-	}()
-	return cli, nil
 }
 
 func (c *client) Set(toplevel, item string, value string) error {
@@ -104,119 +92,103 @@ func (c *client) Command(toplevel string, cmd []byte) error {
 }
 
 func (c *client) Subscribe(toplevel, item string) (*Subscription, error) {
-	ch := make(chan StatusMessage, 100)
-	s := &Subscription{
-		c:  c,
-		ch: ch,
-		C:  ch,
-	}
-	update := subUpdate{
-		Topic: path.Join(toplevel, statusPath, item),
-		Add:   true,
-		Sub:   s,
-		done:  make(chan struct{}),
-	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
 
-	// Send update
-	select {
-	case <-c.closing:
-		return nil, errors.New("client closed")
-	case c.subUpdates <- update:
-	}
-
-	// Wait till update is done
-	select {
-	case <-c.closing:
-		return nil, errors.New("client closed")
-	case <-update.done:
-	}
-	return s, nil
-}
-
-func (c *client) unsubscribe(s *Subscription) {
-	update := subUpdate{
-		Add: false,
-		Sub: s,
-	}
-
-	select {
-	case <-c.closing:
-	case c.subUpdates <- update:
-	}
-}
-
-func (c *client) handleStatusMessage(_ mqtt.Client, m mqtt.Message) {
-	select {
-	case <-c.closing:
-	case c.statusMessages <- m:
-	}
-}
-
-func (c *client) doSubs() {
-	subs := make(map[string][]*Subscription)
-	for {
-		select {
-		case <-c.closing:
-			return
-		case update := <-c.subUpdates:
-			topic := update.Topic
-			if update.Add {
-				subs[topic] = append(subs[topic], update.Sub)
-				close(update.done)
-			} else {
-				list := subs[topic]
-				filtered := list[0:0]
-				for _, s := range list {
-					if s != update.Sub {
-						filtered = append(filtered, s)
-					}
-				}
-				subs[topic] = filtered
-			}
-		case m := <-c.statusMessages:
-			//TODO add wildcard support
-			topic := m.Topic()
-			list := subs[topic]
-			if len(list) == 0 {
-				break
-			}
-			i := strings.Index(topic, statusPathComplete)
-			sm := StatusMessage{
-				Toplevel: topic[:i],
-				Item:     topic[:i+len(statusPathComplete)],
-				Value:    PayloadToValue(m.Payload()),
-			}
-			for _, s := range list {
-				select {
-				case s.ch <- sm:
-				default:
-				}
-			}
+	statusTopic := path.Join(toplevel, statusPath, item)
+	sub, ok := c.subs[statusTopic]
+	if !ok {
+		sub = &subscription{
+			c:     c,
+			topic: statusTopic,
 		}
+		if token := c.c.Subscribe(statusTopic, 0, sub.handleStatusMessage); token.Wait() && token.Error() != nil {
+			return nil, token.Error()
+		}
+		c.subs[statusTopic] = sub
 	}
+	return sub.subscribe(), nil
+}
+
+func (c *client) unsubscribe(topic string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.subs, topic)
+	c.c.Unsubscribe(topic)
 }
 
 func (c *client) Close() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
+		return
+	}
+	c.closed = true
 	close(c.closing)
-	c.wg.Wait()
 	if c.disconnect {
 		c.c.Disconnect(defaultDisconnectQuiesce)
 	}
 }
 
-type subUpdate struct {
-	Topic string
-	Sub   *Subscription
-	Add   bool
-	done  chan struct{}
-}
-
 type Subscription struct {
-	c  *client
+	s  *subscription
 	ch chan StatusMessage
 	C  <-chan StatusMessage
 }
 
 func (s *Subscription) Unsubscribe() {
-	s.c.unsubscribe(s)
+	s.s.unsubscribe(s)
+}
+
+type subscription struct {
+	topic string
+	c     *client
+	mu    sync.Mutex
+	subs  []*Subscription
+}
+
+func (s *subscription) handleStatusMessage(c mqtt.Client, m mqtt.Message) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	topic := m.Topic()
+	i := strings.Index(topic, statusPathComplete)
+	sm := StatusMessage{
+		Toplevel: topic[:i],
+		Item:     topic[i+len(statusPathComplete):],
+		Value:    PayloadToValue(m.Payload()),
+	}
+
+	for _, sub := range s.subs {
+		select {
+		case sub.ch <- sm:
+		}
+	}
+}
+
+func (s *subscription) subscribe() *Subscription {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	ch := make(chan StatusMessage)
+	sub := &Subscription{
+		s:  s,
+		ch: ch,
+		C:  ch,
+	}
+	s.subs = append(s.subs, sub)
+	return sub
+}
+
+func (s *subscription) unsubscribe(unsub *Subscription) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	filtered := s.subs[0:0]
+	for _, sub := range s.subs {
+		if sub != unsub {
+			filtered = append(filtered, sub)
+		}
+	}
+	s.subs = filtered
+	if len(filtered) == 0 {
+		s.c.unsubscribe(s.topic)
+	}
 }

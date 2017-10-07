@@ -242,16 +242,20 @@ func (p *parser) pathMatch() *PathMatchNode {
 	}
 	for {
 		switch p.peek().Type {
-		case TokenPlus, TokenWord:
+		case TokenStar:
+			p.next()
+			if p.peek().Type == TokenStar {
+				p.next()
+				pm.Path = path.Join(pm.Path, "**")
+			} else {
+				pm.Path = path.Join(pm.Path, "*")
+			}
+		case TokenWord:
 			t := p.next()
 			pm.Path = path.Join(pm.Path, t.Value)
-		case TokenHash:
-			t := p.next()
-			pm.Path = path.Join(pm.Path, t.Value)
-			return pm
 		default:
 			if pm.Path == "" {
-				p.unexpected(p.next(), TokenPlus, TokenWord, TokenHash)
+				p.unexpected(p.next(), TokenStar, TokenWord)
 				return nil
 			}
 			return pm
