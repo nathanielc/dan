@@ -59,7 +59,7 @@ func PayloadToValue(data []byte) Value {
 
 func DefaultMQTTClientOptions() *mqtt.ClientOptions {
 	return mqtt.NewClientOptions().
-		SetKeepAlive(5 * time.Second).
+		SetKeepAlive(time.Minute).
 		SetAutoReconnect(true)
 }
 
