@@ -1,5 +1,7 @@
 # Jim
 
+[![mqtt-smarthome](https://img.shields.io/badge/mqtt-smarthome-blue.svg)](https://github.com/mqtt-smarthome/mqtt-smarthome)
+
 Jim is a home automation assistant.
 
 Jim comes with a simple DSL for connecting to devices via the [mqtt-smarthome](https://github.com/mqtt-smarthome) architecture.
