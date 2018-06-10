@@ -10,6 +10,7 @@ import (
 	"strings"
 	"syscall"
 
+	mqtt "github.com/eclipse/paho.mqtt.golang"
 	"github.com/nathanielc/jim/dsl"
 	"github.com/nathanielc/jim/dsl/eval"
 	"github.com/pkg/errors"
@@ -22,6 +23,11 @@ var lat = flag.Float64("lat", 0, "Latitude, used for sun relative times")
 var lon = flag.Float64("lon", 0, "Longitude, used for sun relative times")
 
 func main() {
+	mqtt.ERROR = log.New(os.Stderr, "E ", log.LstdFlags)
+	mqtt.CRITICAL = log.New(os.Stderr, "C ", log.LstdFlags)
+	mqtt.WARN = log.New(os.Stderr, "W ", log.LstdFlags)
+	mqtt.DEBUG = log.New(os.Stderr, "D ", log.LstdFlags)
+
 	flag.Parse()
 
 	scripts, err := loadScripts(*dir)

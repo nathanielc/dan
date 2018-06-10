@@ -22,20 +22,21 @@
 // equality is determined by recursively comparing the primitive kinds on both
 // values, much like reflect.DeepEqual. Unlike reflect.DeepEqual, unexported
 // fields are not compared by default; they result in panics unless suppressed
-// by using an Ignore option (see cmpopts.IgnoreUnexported) or explictly compared
+// by using an Ignore option (see cmpopts.IgnoreUnexported) or explicitly compared
 // using the AllowUnexported option.
 package cmp
 
 import (
 	"fmt"
 	"reflect"
+	"strings"
 
 	"github.com/google/go-cmp/cmp/internal/diff"
 	"github.com/google/go-cmp/cmp/internal/function"
 	"github.com/google/go-cmp/cmp/internal/value"
 )
 
-// BUG: Maps with keys containing NaN values cannot be properly compared due to
+// BUG(dsnet): Maps with keys containing NaN values cannot be properly compared due to
 // the reflection package's inability to retrieve such entries. Equal will panic
 // anytime it comes across a NaN key, but this behavior may change.
 //
@@ -61,8 +62,8 @@ var nothing = reflect.Value{}
 //
 // • If the values have an Equal method of the form "(T) Equal(T) bool" or
 // "(T) Equal(I) bool" where T is assignable to I, then use the result of
-// x.Equal(y). Otherwise, no such method exists and evaluation proceeds to
-// the next rule.
+// x.Equal(y) even if x or y is nil.
+// Otherwise, no such method exists and evaluation proceeds to the next rule.
 //
 // • Lastly, try to compare x and y based on their basic kinds.
 // Simple kinds like booleans, integers, floats, complex numbers, strings, and
@@ -111,6 +112,10 @@ type state struct {
 	result   diff.Result // The current result of comparison
 	curPath  Path        // The current path in the value tree
 	reporter reporter    // Optional reporter used for difference formatting
+
+	// recChecker checks for infinite cycles applying the same set of
+	// transformers upon the output of itself.
+	recChecker recChecker
 
 	// dynChecker triggers pseudo-random checks for option correctness.
 	// It is safe for statelessCompare to mutate this value.
@@ -181,6 +186,7 @@ func (s *state) statelessCompare(vx, vy reflect.Value) diff.Result {
 
 func (s *state) compareAny(vx, vy reflect.Value) {
 	// TODO: Support cyclic data structures.
+	s.recChecker.Check(s.curPath)
 
 	// Rule 0: Differing types are never equal.
 	if !vx.IsValid() || !vy.IsValid() {
@@ -304,7 +310,8 @@ func (s *state) tryOptions(vx, vy reflect.Value, t reflect.Type) bool {
 
 	// Evaluate all filters and apply the remaining options.
 	if opt := opts.filter(s, vx, vy, t); opt != nil {
-		return opt.apply(s, vx, vy)
+		opt.apply(s, vx, vy)
+		return true
 	}
 	return false
 }
@@ -322,6 +329,7 @@ func (s *state) tryMethod(vx, vy reflect.Value, t reflect.Type) bool {
 }
 
 func (s *state) callTRFunc(f, v reflect.Value) reflect.Value {
+	v = sanitizeValue(v, f.Type().In(0))
 	if !s.dynChecker.Next() {
 		return f.Call([]reflect.Value{v})[0]
 	}
@@ -345,6 +353,8 @@ func (s *state) callTRFunc(f, v reflect.Value) reflect.Value {
 }
 
 func (s *state) callTTBFunc(f, x, y reflect.Value) bool {
+	x = sanitizeValue(x, f.Type().In(0))
+	y = sanitizeValue(y, f.Type().In(1))
 	if !s.dynChecker.Next() {
 		return f.Call([]reflect.Value{x, y})[0].Bool()
 	}
@@ -372,20 +382,41 @@ func detectRaces(c chan<- reflect.Value, f reflect.Value, vs ...reflect.Value) {
 	ret = f.Call(vs)[0]
 }
 
+// sanitizeValue converts nil interfaces of type T to those of type R,
+// assuming that T is assignable to R.
+// Otherwise, it returns the input value as is.
+func sanitizeValue(v reflect.Value, t reflect.Type) reflect.Value {
+	// TODO(dsnet): Workaround for reflect bug (https://golang.org/issue/22143).
+	// The upstream fix landed in Go1.10, so we can remove this when drop support
+	// for Go1.9 and below.
+	if v.Kind() == reflect.Interface && v.IsNil() && v.Type() != t {
+		return reflect.New(t).Elem()
+	}
+	return v
+}
+
 func (s *state) compareArray(vx, vy reflect.Value, t reflect.Type) {
 	step := &sliceIndex{pathStep{t.Elem()}, 0, 0}
 	s.curPath.push(step)
 
 	// Compute an edit-script for slices vx and vy.
-	eq, es := diff.Difference(vx.Len(), vy.Len(), func(ix, iy int) diff.Result {
+	es := diff.Difference(vx.Len(), vy.Len(), func(ix, iy int) diff.Result {
 		step.xkey, step.ykey = ix, iy
 		return s.statelessCompare(vx.Index(ix), vy.Index(iy))
 	})
 
-	// Equal or no edit-script, so report entire slices as is.
-	if eq || es == nil {
+	// Report the entire slice as is if the arrays are of primitive kind,
+	// and the arrays are different enough.
+	isPrimitive := false
+	switch t.Elem().Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr,
+		reflect.Bool, reflect.Float32, reflect.Float64, reflect.Complex64, reflect.Complex128:
+		isPrimitive = true
+	}
+	if isPrimitive && es.Dist() > (vx.Len()+vy.Len())/4 {
 		s.curPath.pop() // Pop first since we are reporting the whole slice
-		s.report(eq, vx, vy)
+		s.report(false, vx, vy)
 		return
 	}
 
@@ -490,6 +521,45 @@ func (s *state) report(eq bool, vx, vy reflect.Value) {
 	}
 	if s.reporter != nil {
 		s.reporter.Report(vx, vy, eq, s.curPath)
+	}
+}
+
+// recChecker tracks the state needed to periodically perform checks that
+// user provided transformers are not stuck in an infinitely recursive cycle.
+type recChecker struct{ next int }
+
+// Check scans the Path for any recursive transformers and panics when any
+// recursive transformers are detected. Note that the presence of a
+// recursive Transformer does not necessarily imply an infinite cycle.
+// As such, this check only activates after some minimal number of path steps.
+func (rc *recChecker) Check(p Path) {
+	const minLen = 1 << 16
+	if rc.next == 0 {
+		rc.next = minLen
+	}
+	if len(p) < rc.next {
+		return
+	}
+	rc.next <<= 1
+
+	// Check whether the same transformer has appeared at least twice.
+	var ss []string
+	m := map[Option]int{}
+	for _, ps := range p {
+		if t, ok := ps.(Transform); ok {
+			t := t.Option()
+			if m[t] == 1 { // Transformer was used exactly once before
+				tf := t.(*transformer).fnc.Type()
+				ss = append(ss, fmt.Sprintf("%v: %v => %v", t, tf.In(0), tf.Out(0)))
+			}
+			m[t]++
+		}
+	}
+	if len(ss) > 0 {
+		const warning = "recursive set of Transformers detected"
+		const help = "consider using cmpopts.AcyclicTransformer"
+		set := strings.Join(ss, "\n\t")
+		panic(fmt.Sprintf("%s:\n\t%s\n%s", warning, set, help))
 	}
 }
 

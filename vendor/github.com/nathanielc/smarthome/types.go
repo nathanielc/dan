@@ -59,8 +59,8 @@ func PayloadToValue(data []byte) Value {
 
 func DefaultMQTTClientOptions() *mqtt.ClientOptions {
 	return mqtt.NewClientOptions().
-		SetKeepAlive(time.Minute).
-		SetAutoReconnect(true)
+		SetAutoReconnect(true).
+		SetCleanSession(false)
 }
 
 type StatusMessage struct {

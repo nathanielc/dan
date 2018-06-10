@@ -21,15 +21,23 @@
 
 [[projects]]
   name = "github.com/eclipse/paho.mqtt.golang"
-  packages = [".","packets"]
-  revision = "aff15770515e3c57fc6109da73d42b0d46f7f483"
-  version = "v1.1.0"
+  packages = [
+    ".",
+    "packets"
+  ]
+  revision = "36d01c2b4cbeb3d2a12063e4880ce30800af9560"
+  version = "v1.1.1"
 
 [[projects]]
   branch = "master"
   name = "github.com/google/go-cmp"
-  packages = ["cmp","cmp/internal/diff","cmp/internal/function","cmp/internal/value"]
-  revision = "d5735f74713c51f7450a43d0a98d41ce2c1db3cb"
+  packages = [
+    "cmp",
+    "cmp/internal/diff",
+    "cmp/internal/function",
+    "cmp/internal/value"
+  ]
+  revision = "5411ab924f9ffa6566244a9e504bc347edacffd3"
 
 [[projects]]
   name = "github.com/gorhill/cronexpr"
@@ -41,7 +49,7 @@
   branch = "master"
   name = "github.com/nathanielc/smarthome"
   packages = ["."]
-  revision = "1648802e1a81addc392c04cc432327346be38ecb"
+  revision = "ab451ca02227225eadc5445cfb458317bc8616de"
 
 [[projects]]
   name = "github.com/pkg/errors"
@@ -52,12 +60,16 @@
 [[projects]]
   branch = "master"
   name = "golang.org/x/net"
-  packages = ["proxy","websocket"]
-  revision = "0744d001aa8470aaa53df28d32e5ceeb8af9bd70"
+  packages = [
+    "internal/socks",
+    "proxy",
+    "websocket"
+  ]
+  revision = "1e491301e022f8f977054da4c2d852decd59571f"
 
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "321b8a8ee88bdd3a7b035e7a90b87a0bebe000f0eb20aca5268c55e926ccc2ad"
+  inputs-digest = "8e3bda46279ce91addbfc2f4dfa60515b3265a68e18d39293289df6bb698ad6c"
   solver-name = "gps-cdcl"
   solver-version = 1
