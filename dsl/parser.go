@@ -149,6 +149,8 @@ func (p *parser) blockStatement() Node {
 		return p.varStatement()
 	case TokenAt:
 		return p.atStatement()
+	case TokenActivate:
+		return p.activateStatement()
 	case TokenWhen:
 		return p.whenStatement()
 	case TokenStart:
@@ -338,6 +340,19 @@ func (p *parser) atStatement() *AtStatementNode {
 		Position: t.Pos,
 		Time:     tm,
 		Block:    b,
+	}
+}
+
+func (p *parser) activateStatement() *ActivateStatementNode {
+	t := p.expect(TokenActivate)
+	w := p.expect(TokenWord)
+	start := p.time()
+	stop := p.time()
+	return &ActivateStatementNode{
+		Position: t.Pos,
+		Scene:    w,
+		Start:    start,
+		Stop:     stop,
 	}
 }
 

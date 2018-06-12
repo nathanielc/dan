@@ -87,6 +87,36 @@ func TestParser(t *testing.T) {
 				},
 			},
 		},
+		"activate_statement": {
+			input: "activate workout 10:00 AM 11:00 AM",
+			ast: &dsl.ProgramNode{
+				Position: dsl.Position{Line: 1, Char: 1},
+				Statements: []dsl.Node{
+					&dsl.ActivateStatementNode{
+						Position: dsl.Position{Line: 1, Char: 1},
+						Scene: dsl.Token{
+							Pos:   dsl.Position{Line: 1, Char: 10},
+							Type:  dsl.TokenWord,
+							Value: "workout",
+						},
+						Start: &dsl.TimeNode{
+							Position: dsl.Position{Line: 1, Char: 18},
+							Hour:     10,
+							Minute:   0,
+							AM:       true,
+							Literal:  "10:00",
+						},
+						Stop: &dsl.TimeNode{
+							Position: dsl.Position{Line: 1, Char: 27},
+							Hour:     11,
+							Minute:   0,
+							AM:       true,
+							Literal:  "11:00",
+						},
+					},
+				},
+			},
+		},
 		"when_statement": {
 			input: `
 when

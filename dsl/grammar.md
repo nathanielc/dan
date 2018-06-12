@@ -26,4 +26,5 @@ Path              = "$" | { word "/" } word .
 PathMatch         = "$" | { ( word | "+" ) "/" } ( word | "+"  | "#" ) .
 StartStatement    = "start" word .
 StopStatement     = "stop" word .
+ActivateStatement = "activate" word Time Time .
 ```

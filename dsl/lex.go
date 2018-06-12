@@ -33,6 +33,7 @@ const (
 	TokenPM
 	TokenStart
 	TokenStop
+	TokenActivate
 
 	TokenWord
 	TokenString
@@ -80,6 +81,8 @@ func (tt TokenType) String() string {
 		return "start"
 	case TokenStop:
 		return "stop"
+	case TokenActivate:
+		return "activate"
 	case TokenWord:
 		return "word"
 	case TokenString:
@@ -108,19 +111,20 @@ func (tt TokenType) String() string {
 }
 
 var keywords = map[string]TokenType{
-	"list":  TokenList,
-	"set":   TokenSet,
-	"get":   TokenGet,
-	"var":   TokenVar,
-	"scene": TokenScene,
-	"at":    TokenAt,
-	"start": TokenStart,
-	"stop":  TokenStop,
-	"when":  TokenWhen,
-	"wait":  TokenWait,
-	"is":    TokenIs,
-	"AM":    TokenAM,
-	"PM":    TokenPM,
+	"list":     TokenList,
+	"set":      TokenSet,
+	"get":      TokenGet,
+	"var":      TokenVar,
+	"scene":    TokenScene,
+	"at":       TokenAt,
+	"activate": TokenActivate,
+	"start":    TokenStart,
+	"stop":     TokenStop,
+	"when":     TokenWhen,
+	"wait":     TokenWait,
+	"is":       TokenIs,
+	"AM":       TokenAM,
+	"PM":       TokenPM,
 }
 
 type lexer struct {

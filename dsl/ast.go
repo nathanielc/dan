@@ -73,6 +73,13 @@ type AtStatementNode struct {
 	Block *BlockNode
 }
 
+type ActivateStatementNode struct {
+	Position
+	Scene Token
+	Start *TimeNode
+	Stop  *TimeNode
+}
+
 type TimeNode struct {
 	Position
 	Hour    int

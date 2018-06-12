@@ -98,6 +98,8 @@ func (e *Evaluator) evalWithLock(scene *sceneState, node dsl.Node) (Result, erro
 		return e.evalNodeList(scene, n.Statements)
 	case *dsl.AtStatementNode:
 		return e.evalAt(scene, n)
+	case *dsl.ActivateStatementNode:
+		return e.evalActivate(scene, n)
 	case *dsl.SceneStatementNode:
 		return e.evalDefineScene(n)
 	case *dsl.StartStatementNode:
@@ -147,6 +149,47 @@ func (e *Evaluator) evalAt(scene *sceneState, n *dsl.AtStatementNode) (Result, e
 	scene.cancel = append(scene.cancel, cancel)
 
 	return nil, nil
+}
+
+func (e *Evaluator) evalActivate(scene *sceneState, n *dsl.ActivateStatementNode) (Result, error) {
+	startAt := &dsl.AtStatementNode{
+		Position: n.Position,
+		Time:     n.Start,
+		Block: &dsl.BlockNode{
+			Statements: []dsl.Node{&dsl.StartStatementNode{
+				Position:   n.Position,
+				Identifier: n.Scene,
+			}},
+		},
+	}
+	stopAt := &dsl.AtStatementNode{
+		Position: n.Position,
+		Time:     n.Stop,
+		Block: &dsl.BlockNode{
+			Statements: []dsl.Node{&dsl.StopStatementNode{
+				Position:   n.Position,
+				Identifier: n.Scene,
+			}},
+		},
+	}
+	now := time.Now().Local()
+	start := toTime(now, n.Start)
+	stop := toTime(now, n.Stop)
+	if stop.Before(start) {
+		stop = stop.Add(24 * time.Hour)
+	}
+	if start.Before(now) && now.Before(stop) {
+		if _, err := e.evalStartScene(&dsl.StartStatementNode{
+			Position:   n.Position,
+			Identifier: n.Scene,
+		}); err != nil {
+			return nil, err
+		}
+	}
+	if _, err := e.evalAt(scene, startAt); err != nil {
+		return nil, err
+	}
+	return e.evalAt(scene, stopAt)
 }
 
 func (e *Evaluator) evalDefineScene(n *dsl.SceneStatementNode) (Result, error) {
@@ -281,4 +324,12 @@ func (s *sceneState) Stop() {
 	for _, c := range s.cancel {
 		c()
 	}
+}
+
+func toTime(now time.Time, t *dsl.TimeNode) time.Time {
+	hour := t.Hour
+	if !t.AM {
+		hour += 12
+	}
+	return time.Date(now.Year(), now.Month(), now.Day(), hour, t.Minute, 0, 0, now.Location())
 }
