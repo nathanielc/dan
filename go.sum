@@ -1,0 +1,13 @@
+github.com/chzyer/readline v0.0.0-20160726135117-62c6fe619375/go.mod h1:nSuG5e5PlCu98SY8svDHJxuZscDgtXS6KTTbou5AhLI=
+github.com/chzyer/readline v0.0.0-20180603132655-2972be24d48e/go.mod h1:nSuG5e5PlCu98SY8svDHJxuZscDgtXS6KTTbou5AhLI=
+github.com/cpucycle/astrotime v0.0.0-20120927164819-9c7d514efdb5/go.mod h1:O+WdStE4WLD+lG5MaDRl9dSJR7w4HZJrJbqVsOEx5Lw=
+github.com/davecheney/gpio v0.0.0-20160912024957-a6de66e7e470/go.mod h1:43PwoPhLiAtAufKfF2PL7uav7KfyIXgGKqlcXPpvMAo=
+github.com/eclipse/paho.mqtt.golang v1.1.1/go.mod h1:H9keYFcgq3Qr5OUJm/JZI/i6U7joQ8SYLhZwfeOo6Ts=
+github.com/google/go-cmp v0.0.0-20180328201512-5411ab924f9f/go.mod h1:oXzfMopK8JAjlY9xF4vHSVASa0yLyX7SntLO5aqRK0M=
+github.com/gorhill/cronexpr v0.0.0-20140423231348-a557574d6c02/go.mod h1:g2644b03hfBX9Ov0ZBDgXXens4rxSxmqFBbhvKv2yVA=
+github.com/gorhill/cronexpr v0.0.0-20180427100037-88b0669f7d75/go.mod h1:g2644b03hfBX9Ov0ZBDgXXens4rxSxmqFBbhvKv2yVA=
+github.com/nathanielc/smarthome v0.0.0-20180610184257-ab451ca02227/go.mod h1:Ic9p0NMT3WpEPmGmAFz+mtJJEo+FNljEY06wOldFvh8=
+github.com/nathanielc/smarthome v0.0.1/go.mod h1:4NH8Geea7g6B41lTW3FzLvQRPMbu0VOc9SDkR11aPhk=
+github.com/pkg/errors v0.8.0/go.mod h1:bwawxfHBFNV+L2hUp1rHADufV3IMtnDRdf1r5NINEl0=
+golang.org/x/net v0.0.0-20180530234432-1e491301e022/go.mod h1:mL1N/T3taQHkDXs73rZJwtUhF3w3ftmwwsq0BUmARs4=
+golang.org/x/net v0.0.0-20180826012351-8a410e7b638d/go.mod h1:mL1N/T3taQHkDXs73rZJwtUhF3w3ftmwwsq0BUmARs4=
