@@ -4,6 +4,7 @@ mod frontend;
 
 fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
     let foo: String = fs::read_to_string("test.jim")?;
-    let block = frontend::parser::block(&foo)?;
+    let f = frontend::parser::file(&foo)?;
+    println!("AST: {:?}", f);
     Ok(())
 }

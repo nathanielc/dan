@@ -1,0 +1,12 @@
+set masterbedroom/lights "off"
+set masterbedroom/lights "on"
+
+set downstairs/lights "50"
+
+let bed_lights = get masterbedroom/lights
+
+set downstairs/lights bed_lights
+
+when downstairs/lights is "off" set masterbedroom/lights "off"
+when downstairs/lights is "off" wait 5s set masterbedroom/lights "off"
+

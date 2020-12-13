@@ -1,45 +1,75 @@
-pub mod fronted;
-
 /// The AST node for expressions.
 #[derive(Debug, PartialEq)]
 pub enum Expr {
-    Block(Vec<Expr>),
-    Set(String, String),
     Get(String),
-    Assign(String, Box<Expr>),
-    When(String, String, String, Box<Expr>),
+    String(String),
+    Duration(String),
+    Ident(String),
+}
+
+#[derive(Debug, PartialEq)]
+pub enum Stmt {
+    Block(Vec<Stmt>),
+    Set(String, Expr),
+    Let(String, Expr),
+    When(String, Expr, Box<Stmt>),
+    Wait(Expr, Box<Stmt>),
+    Expr(Expr),
+}
+
+#[derive(Debug, PartialEq)]
+pub struct File {
+    stmts: Vec<Stmt>,
 }
 
 peg::parser!(pub grammar parser() for str {
-    pub rule block() -> Expr
-        = _ "{" _ "\n"? _ b:(statement()*) _ "}" _ "\n"? { Expr::Block(b) }
-        / _ s:statement() _ { Expr::Block(vec![s]) }
-    rule statement() -> Expr
-        = _ e:expression() _ "\n"? { e }
+    pub rule file() -> File
+        = _ s:statement()* _ { File{stmts: s} }
+
+    rule statement() -> Stmt
+        = block()
+        / set()
+        / let()
+        / when()
+        / wait()
+        / e:expression() { Stmt::Expr(e) }
+
+    rule block() -> Stmt
+        = _ "{" _ b:(statement()*) _ "}" _ { Stmt::Block(b) }
+
+    rule set() -> Stmt
+        =  _ "set" _ pm:path_match() _ e:expression() _ { Stmt::Set(pm, e) }
+
+    rule let() -> Stmt
+        =  _ "let" _ i:identifier() _ "=" _ e:expression() _  { Stmt::Let(i, e) }
+
+    rule when() -> Stmt
+        =  _ "when" _
+            pm:path_match()
+            _ "is" _
+            e:expression()
+            s:statement() _ { Stmt::When(pm, e,  Box::new(s)) }
+
+    rule wait() -> Stmt
+        =  _ "wait" _
+            d:duration() _
+            s:statement() _ { Stmt::Wait(d, Box::new(s)) }
 
     rule expression() -> Expr
-        = set()
-        / get()
-        / assign()
-        / when()
-
-    rule set() -> Expr
-        =  _ "set" _ pm:path_match() _ v:value() _ { Expr::Set(pm, v) }
+        = get()
+        / string()
+        / duration()
+        / i:identifier() {Expr::Ident(i)}
 
     rule get() -> Expr
         =  _ "get" _ p:path() _  { Expr::Get(p) }
 
-    rule assign() -> Expr
-        =  _ "var" _ i:identifier() _ "=" _ e:expression() _  { Expr::Assign(i, Box::new(e)) }
+    rule string() -> Expr
+        = "\"" v:$(['0'..='9'| 'a'..='z' | 'A'..='Z' | '_' ]+) "\"" { Expr::String(v.to_owned()) }
 
-    rule when() -> Expr
-        =  _ "when" _
-            pm:path_match()
-            _ "is" _
-            v:value()
-            _ "wait" _
-            d:duration()
-            _ b:block() _ { Expr::When(pm, v, d, Box::new(b)) }
+    rule duration() -> Expr
+        = d:$(['0'..='9']+ ("h"/"m"/"s")) { Expr::Duration(d.to_owned()) }
+
 
     rule path_match() -> String
         = pm:$(
@@ -53,19 +83,14 @@ peg::parser!(pub grammar parser() for str {
             (( identifier() "/")* (identifier()))
         ) { p.to_owned() }
 
-    rule duration() -> String
-        = d:$(['0'..='9']+ ("h"/"m"/"s")) { d.to_owned() }
 
     rule identifier() -> String
         = quiet!{ n:$(['a'..='z' | 'A'..='Z' | '_']['a'..='z' | 'A'..='Z' | '0'..='9' | '_']*) { n.to_owned() } }
         / expected!("identifier")
 
-    rule value() -> String
-        = v:$(['0'..='9'| 'a'..='z' | 'A'..='Z' ]+) { v.to_owned() }
-
-    rule _() =  quiet!{[' ' | '\t']*}
+    rule _() =  quiet!{[' ' | '\t' | '\n']*}
 });
-
+/*
 #[cfg(test)]
 mod test {
     use super::*;
@@ -136,3 +161,4 @@ mod test {
         )
     }
 }
+*/
