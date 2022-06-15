@@ -1,5 +1,7 @@
 pub mod ast;
 pub mod compiler;
+pub mod mqtt_engine;
+pub mod vm;
 
 pub type Result<T> = anyhow::Result<T>;
 
@@ -9,9 +11,7 @@ pub trait Compile {
     fn from_ast(ast: ast::Stmt) -> Self::Output;
 
     fn from_source(source: &str) -> Self::Output {
-        println!("Compiling the source: {}", source);
         let ast: ast::Stmt = parser::file(source).unwrap();
-        println!("{:?}", ast);
         Self::from_ast(ast)
     }
 }
@@ -99,6 +99,6 @@ mod tests {
     fn test_hello_world() {
         let source = "print \"hello_world\"";
         let ast: Stmt = file(source).unwrap();
-        println!("{:?}", ast);
+        log::debug!("{:?}", ast);
     }
 }
