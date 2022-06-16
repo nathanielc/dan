@@ -1,4 +1,5 @@
 use anyhow::Result;
+use async_trait::async_trait;
 use std::sync::Arc;
 
 use crate::vm::Engine;
@@ -27,25 +28,19 @@ impl MQTTEngine {
     }
 }
 
-impl<'a> Engine<'a> for Arc<MQTTEngine> {
-    fn when(&self, _path: &str, _value: &str) -> futures::future::BoxFuture<'a, Option<String>> {
+#[async_trait]
+impl Engine for Arc<MQTTEngine> {
+    async fn when(&self, _path: &str, _value: &str) -> Result<()> {
         todo!()
     }
 
-    fn set(&self, path: &str, value: &str) -> futures::future::BoxFuture<'a, Option<String>> {
-        let s = self.clone();
-        let path = path.to_string();
-        let value = value.as_bytes().to_vec();
-        Box::pin(async move {
-            log::debug!("set {}", &path);
-            let msg = mqtt::Publish::new(path, value);
-            s.cli.publish(&msg).await.unwrap();
-            log::debug!("set done");
-            None
-        })
+    async fn set(&self, path: &str, value: &str) -> Result<()> {
+        let msg = mqtt::Publish::new(path.to_string(), value.as_bytes().to_vec());
+        self.cli.publish(&msg).await?;
+        Ok(())
     }
 
-    fn get(&self, _path: &str) -> futures::future::BoxFuture<'a, Option<String>> {
+    async fn get(&self, _path: &str) -> Result<String> {
         todo!()
     }
 }
