@@ -5,10 +5,7 @@ use jim::{
     vm::{Engine, VM},
     Compile, Result,
 };
-use std::{
-    io::{self, Read},
-    sync::Arc,
-};
+use std::io::{self, Read};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -17,13 +14,10 @@ async fn main() -> Result<()> {
     let mut input = String::new();
     io::stdin().read_to_string(&mut input)?;
 
-    let mut mqtt = MQTTEngine::new()?;
-    mqtt.connect().await?;
-    let mqtt = Arc::new(mqtt);
+    let mqtt = MQTTEngine::new()?;
 
-    run(input.as_str(), mqtt.clone()).await?;
+    run(input.as_str(), mqtt).await?;
 
-    Arc::try_unwrap(mqtt).unwrap().disconnect().await?;
     Ok(())
 }
 
