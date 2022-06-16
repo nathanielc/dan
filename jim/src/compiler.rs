@@ -65,7 +65,6 @@ pub enum Instruction {
     Wait,
     Set,
     Get,
-    GetResult,
 }
 
 #[derive(Debug, PartialEq)]
@@ -250,7 +249,6 @@ impl Interpreter {
                 self.add_instruction(Instruction::Constant(const_index));
                 // Watch, creates a promise
                 self.add_instruction(Instruction::Get);
-                self.add_instruction(Instruction::GetResult);
             }
             Expr::String(_) | Expr::Duration(_) => {
                 let const_index = self.add_constant(expr.try_into().unwrap());
@@ -546,7 +544,6 @@ print x
                 instructions: vec![
                     Instruction::Constant(0),
                     Instruction::Get,
-                    Instruction::GetResult,
                     Instruction::Pop,
                     Instruction::Term
                 ],

@@ -1,75 +1,39 @@
-use crate::compiler::{Code, Instruction, Value};
-
 use {
-    async_std::task,
-    futures::{
-        future::{BoxFuture, FutureExt},
-        task::{waker_ref, ArcWake},
-    },
-    std::{
-        convert::TryInto,
-        fmt,
-        sync::mpsc::{sync_channel, Receiver, SyncSender},
-        sync::{Arc, Mutex},
-        task::{Context, Poll},
-        time::Duration,
-    },
+    anyhow::Result,
+    async_trait::async_trait,
+    futures::future::{BoxFuture, FutureExt},
+    std::{convert::TryInto, fmt, sync::Arc, time::Duration},
+    tokio::task::JoinHandle,
+    tokio::time,
 };
+
+use tokio::sync::mpsc::{self, Sender};
+
+use crate::compiler::{Code, Instruction, Value};
 
 const STACK_SIZE: usize = 512;
 
-pub trait Engine<'a> {
-    fn wait(&self, d: Duration) -> BoxFuture<'a, Option<String>> {
-        Box::pin(async move {
-            task::sleep(d).await;
-            None
-        })
+#[async_trait]
+pub trait Engine: Clone + Send + Sync {
+    async fn wait(&self, d: Duration) -> Result<()> {
+        time::sleep(d).await;
+        Ok(())
     }
-    fn when(&self, path: &str, value: &str) -> BoxFuture<'a, Option<String>>;
-    fn set(&self, path: &str, value: &str) -> BoxFuture<'a, Option<String>>;
-    fn get(&self, path: &str) -> BoxFuture<'a, Option<String>>;
+    async fn when(&self, path: &str, value: &str) -> Result<()>;
+    async fn set(&self, path: &str, value: &str) -> Result<()>;
+    async fn get(&self, path: &str) -> Result<String>;
 }
 
-pub struct VM<'a, E: Engine<'a>> {
+struct Thread<E: Engine> {
     engine: E,
-    code: Code,
-    // Queue of threads ready to run.
-    // A thread is never preempted.
-    // Consuming a thread from this queue either
-    // runs to completion or it gets blocked.
-    //
-    // A blocked thread is driven by the executor,
-    // once woken the thread is queue back into this channel.
-    // Repeat.
-    threads: Vec<Thread<'a>>,
-
-    // Send threads into ready queue to be driven
-    thread_sender: SyncSender<Arc<Thread<'a>>>,
-    ready_queue: Receiver<Arc<Thread<'a>>>,
-}
-
-struct Thread<'a> {
+    code: Arc<Code>,
     ip: usize,
     stack: [Value; STACK_SIZE],
     stack_ptr: usize, // points to the next free space
-
-    /// In-progress future that should be pushed to completion.
-    ///
-    /// The `Mutex` is not necessary for correctness, since we only have
-    /// one thread executing tasks at once. However, Rust isn't smart
-    /// enough to know that `future` is only mutated from one thread,
-    /// so we need to use the `Mutex` to prove thread-safety. A production
-    /// executor would not need this, and could use `UnsafeCell` instead.
-    future: Mutex<Option<BoxFuture<'a, Option<String>>>>,
-
-    /// Handle to place the task itself back onto the task queue.
-    sender: SyncSender<Arc<Thread<'a>>>,
-
-    /// The result of the future.
-    result: Option<String>,
+    sender: Sender<JoinHandle<Result<()>>>,
 }
 
-impl<'a> fmt::Debug for Thread<'a> {
+impl<E: Engine> fmt::Debug for Thread<E> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Point")
             .field("ip", &self.ip)
@@ -77,34 +41,31 @@ impl<'a> fmt::Debug for Thread<'a> {
             .finish()
     }
 }
-impl<'a> ArcWake for Thread<'a> {
-    fn wake_by_ref(arc_self: &Arc<Self>) {
-        // Implement `wake` by sending this task back onto the task channel
-        // so that it will be polled again by the executor.
-        let cloned = arc_self.clone();
-        arc_self.sender.send(cloned).expect("too many tasks queued");
-    }
-}
 
-impl<'a> Thread<'a> {
-    fn new(ip: usize, sender: SyncSender<Arc<Thread<'a>>>) -> Thread<'a> {
+impl<E: Engine + 'static> Thread<E> {
+    fn new(
+        engine: E,
+        code: Arc<Code>,
+        ip: usize,
+        sender: Sender<JoinHandle<Result<()>>>,
+    ) -> Thread<E> {
         Thread {
+            engine,
+            code,
             ip,
             stack: unsafe { std::mem::zeroed() },
             stack_ptr: 0,
             sender,
-            future: Mutex::new(None),
-            result: None,
         }
     }
-    fn from_spawn(&self, ip: usize) -> Thread<'a> {
+    fn from_spawn(&self, ip: usize) -> Thread<E> {
         Thread {
+            engine: self.engine.clone(),
+            code: self.code.clone(),
             ip,
             stack: self.stack.clone(),
             stack_ptr: self.stack_ptr,
             sender: self.sender.clone(),
-            future: Mutex::new(None),
-            result: None,
         }
     }
     pub fn pick(&mut self, depth: usize) {
@@ -123,197 +84,113 @@ impl<'a> Thread<'a> {
         self.stack_ptr -= 1;
         v
     }
-}
+    fn run(self) -> BoxFuture<'static, Result<()>> {
+        // Use boxed indirection to avoid recusive async calls.
+        // See https://rust-lang.github.io/async-book/07_workarounds/04_recursion.html
+        self._run().boxed()
+    }
+    async fn _run(mut self) -> Result<()> {
+        loop {
+            let inst_addr = self.ip;
+            self.ip += 1;
 
-impl<'a, E: Engine<'a>> VM<'a, E> {
-    pub fn new(code: Code, engine: E) -> VM<'a, E> {
-        // Maximum number of tasks to allow queueing in the channel at once.
-        // This is just to make `sync_channel` happy, and wouldn't be present in
-        // a real executor.
-        const MAX_QUEUED_TASKS: usize = 10_000;
-        let (thread_sender, ready_queue) = sync_channel(MAX_QUEUED_TASKS);
-        // Create the _main_ thread
-        let thread = Thread::new(0, thread_sender.clone());
-        let mut threads = Vec::new();
-        threads.push(thread);
-        VM {
-            engine,
-            code,
-            threads,
-            thread_sender,
-            ready_queue,
+            log::debug!("inst: {:?}", self.code.instructions[inst_addr]);
+            match self.code.instructions[inst_addr] {
+                Instruction::Constant(const_idx) => {
+                    self.push(self.code.constants[const_idx as usize].clone());
+                }
+                Instruction::Print => {
+                    println!("{}", self.pop());
+                }
+                Instruction::Pick(depth) => {
+                    self.pick(depth);
+                }
+                Instruction::Pop => {
+                    self.pop();
+                }
+                Instruction::Spawn(ip) => {
+                    let new_thread = self.from_spawn(self.ip);
+                    let join_handle = tokio::spawn(new_thread.run());
+                    // Track every spawned thread, so we can join on them
+                    self.sender.send(join_handle).await?;
+
+                    // update local ip to jump location
+                    self.ip = ip;
+                }
+                Instruction::Term => {
+                    // This thread is complete.
+                    // The thread will be dropped and forgotten
+                    return Ok(());
+                }
+                Instruction::When => {
+                    let value: String = self.pop().try_into()?;
+                    let path: String = self.pop().try_into()?;
+                    // Creature future and queue it for the executor
+                    self.engine.when(path.as_str(), value.as_str()).await?;
+                }
+                Instruction::Set => {
+                    let value: String = self.pop().try_into()?;
+                    let path: String = self.pop().try_into()?;
+                    // Creature future and queue it for the executor
+                    self.engine.set(path.as_str(), value.as_str()).await?;
+                }
+                Instruction::Get => {
+                    let path: String = self.pop().try_into()?;
+                    // Creature future and queue it for the executor
+                    let result = self.engine.get(path.as_str()).await?;
+                    self.push(Value::Str(result));
+                }
+                Instruction::Wait => {
+                    let v = self.pop();
+                    match v {
+                        Value::Duration(d) => {
+                            self.engine.wait(d).await?;
+                        }
+                        _ => {
+                            panic!("wait arg must be a duration")
+                        }
+                    };
+                }
+            }
         }
     }
-    pub fn run(&mut self) {
-        let mut active_thread_count = 1;
-        // Drive all threads to completion
-        while active_thread_count > 0 {
-            let mut new_threads = Vec::new();
-            for mut thread in self.threads.drain(..) {
-                loop {
-                    let inst_addr = thread.ip;
-                    thread.ip += 1;
+}
 
-                    log::debug!("inst: {:?}", self.code.instructions[inst_addr]);
-                    match self.code.instructions[inst_addr] {
-                        Instruction::Constant(const_idx) => {
-                            thread.push(self.code.constants[const_idx as usize].clone());
-                        }
-                        Instruction::Print => {
-                            println!("{}", thread.pop());
-                        }
-                        Instruction::Pick(depth) => {
-                            thread.pick(depth);
-                        }
-                        Instruction::Pop => {
-                            thread.pop();
-                        }
-                        Instruction::Spawn(ip) => {
-                            active_thread_count += 1;
-                            new_threads.push(thread.from_spawn(thread.ip));
-                            // update local ip to jump location
-                            thread.ip = ip;
-                        }
-                        Instruction::Term => {
-                            // This thread is complete.
-                            // The thread will be dropped and forgotten
-                            active_thread_count -= 1;
-                            break;
-                        }
-                        Instruction::When => {
-                            let value: String = thread.pop().try_into().unwrap();
-                            let path: String = thread.pop().try_into().unwrap();
-                            // Creature future and queue it for the executor
-                            let future = self.engine.when(path.as_str(), value.as_str());
-                            let future = future.boxed();
-                            {
-                                let mut future_slot = thread.future.lock().unwrap();
-                                *future_slot = Some(future.boxed());
-                            }
-                            self.thread_sender
-                                .send(Arc::new(thread))
-                                .expect("too many tasks queued");
-                            break;
-                        }
-                        Instruction::Set => {
-                            let value: String = thread.pop().try_into().unwrap();
-                            let path: String = thread.pop().try_into().unwrap();
-                            // Creature future and queue it for the executor
-                            let future = self.engine.set(path.as_str(), value.as_str());
-                            let future = future.boxed();
-                            {
-                                let mut future_slot = thread.future.lock().unwrap();
-                                *future_slot = Some(future.boxed());
-                            }
-                            self.thread_sender
-                                .send(Arc::new(thread))
-                                .expect("too many tasks queued");
-                            break;
-                        }
-                        Instruction::Get => {
-                            let path: String = thread.pop().try_into().unwrap();
-                            // Creature future and queue it for the executor
-                            let future = self.engine.get(path.as_str());
-                            let future = future.boxed();
-                            {
-                                let mut future_slot = thread.future.lock().unwrap();
-                                *future_slot = Some(future.boxed());
-                            }
-                            self.thread_sender
-                                .send(Arc::new(thread))
-                                .expect("too many tasks queued");
-                            break;
-                        }
-                        Instruction::GetResult => {
-                            if let Some(result) = thread.result.clone() {
-                                thread.push(Value::Str(result));
-                            } else {
-                                panic!("no result from get")
-                            }
-                        }
-                        Instruction::Wait => {
-                            let v = thread.pop();
-                            match v {
-                                Value::Duration(d) => {
-                                    // Creature future and queue it for the executor
-                                    let future = self.engine.wait(d);
-                                    {
-                                        let mut future_slot = thread.future.lock().unwrap();
-                                        *future_slot = Some(future.boxed());
-                                    }
-                                    self.thread_sender
-                                        .send(Arc::new(thread))
-                                        .expect("too many tasks queued");
-                                    break;
-                                }
-                                _ => {
-                                    panic!("wait arg must be a duration")
-                                }
-                            };
-                        }
-                    }
-                }
-            }
-            if !new_threads.is_empty() {
-                self.threads.append(&mut new_threads);
-                // Eagerly process new threads
-                continue;
-            }
-            if active_thread_count == 0 {
-                // All threads have completed no need to
-                // wait for threads to wake up.
+pub struct VM<E: Engine> {
+    engine: E,
+}
+impl<E: Engine + 'static> VM<E> {
+    pub fn new(engine: E) -> VM<E> {
+        VM { engine }
+    }
+    pub async fn run(&self, code: Code) -> Result<()> {
+        // Create channel for thread counts
+
+        let (thread_join_send, mut thread_join_recv) = mpsc::channel(100);
+
+        // Create and spawn main thread
+        let thread = Thread::new(self.engine.clone(), Arc::new(code), 0, thread_join_send);
+        thread.run().await?;
+
+        // Wait until all threads are completed before returning
+        loop {
+            if let Some(thread_join) = thread_join_recv.recv().await {
+                thread_join.await??;
+            } else {
                 break;
             }
-
-            // Wait for any blocked threads to wake up
-            while let Ok(thread) = self.ready_queue.recv() {
-                // Take the future, and if it has not yet completed (is still Some),
-                // poll it in an attempt to complete it.
-                let mut completed = false;
-                let mut result: Option<String> = None;
-                {
-                    let mut future_slot = thread.future.lock().unwrap();
-                    if let Some(mut future) = future_slot.take() {
-                        // Create a `LocalWaker` from the task itself
-                        let waker = waker_ref(&thread);
-                        let context = &mut Context::from_waker(&*waker);
-                        // `BoxFuture<T>` is a type alias for
-                        // `Pin<Box<dyn Future<Output = T> + Send + 'static>>`.
-                        // We can get a `Pin<&mut dyn Future + Send + 'static>`
-                        // from it by calling the `Pin::as_mut` method.
-                        match future.as_mut().poll(context) {
-                            Poll::Pending => {
-                                // We're not done processing the future, so put it
-                                // back in its task to be run again in the future.
-                                *future_slot = Some(future);
-                            }
-                            Poll::Ready(r) => {
-                                // Queue thread to run again
-                                completed = true;
-
-                                result = r;
-                            }
-                        }
-                    }
-                }
-                if completed {
-                    let mut t =
-                        Arc::try_unwrap(thread).expect("thread still has another reference");
-                    t.result = result;
-                    self.threads.push(t);
-                    // Eagerly process ready thread
-                    break;
-                }
-            }
         }
+        Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use async_std::future;
-    use futures::future::BoxFuture;
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc, Mutex,
+    };
 
     use super::*;
     use crate::compiler::Interpreter;
@@ -344,39 +221,40 @@ mod tests {
         }
     }
 
-    impl<'a> Engine<'a> for Arc<TestEngine> {
-        fn wait(&self, d: Duration) -> BoxFuture<'a, Option<String>> {
+    #[async_trait]
+    impl Engine for Arc<TestEngine> {
+        async fn wait(&self, d: Duration) -> Result<()> {
             self.wait_count.fetch_add(1, Ordering::SeqCst);
             self.wait_args.lock().unwrap().push(d.clone());
-            Box::pin(future::ready(None))
+            future::ready(Ok(())).await
         }
 
-        fn when(&self, path: &str, value: &str) -> BoxFuture<'a, Option<String>> {
+        async fn when(&self, path: &str, value: &str) -> Result<()> {
             self.when_count.fetch_add(1, Ordering::SeqCst);
             self.when_args
                 .lock()
                 .unwrap()
                 .push((path.to_string(), value.to_string()));
-            Box::pin(future::ready(None))
+            future::ready(Ok(())).await
         }
 
-        fn set(&self, path: &str, value: &str) -> BoxFuture<'a, Option<String>> {
+        async fn set(&self, path: &str, value: &str) -> Result<()> {
             self.set_count.fetch_add(1, Ordering::SeqCst);
             self.set_args
                 .lock()
                 .unwrap()
                 .push((path.to_string(), value.to_string()));
-            Box::pin(future::ready(None))
+            future::ready(Ok(())).await
         }
 
-        fn get(&self, path: &str) -> BoxFuture<'a, Option<String>> {
+        async fn get(&self, path: &str) -> Result<String> {
             self.get_count.fetch_add(1, Ordering::SeqCst);
             self.get_args.lock().unwrap().push(path.to_string());
-            Box::pin(future::ready(Some("get value".to_string())))
+            future::ready(Ok("get value".to_string())).await
         }
     }
-    #[test]
-    fn test_when() {
+    #[tokio::test]
+    async fn test_when() {
         let source = "
         when path is \"on\" print \"off\"
 ";
@@ -384,8 +262,8 @@ mod tests {
         log::debug!("code:     {:?}", code);
 
         let te = TestEngine::new();
-        let mut vm = VM::new(code, te.clone());
-        vm.run();
+        let vm = VM::new(te.clone());
+        vm.run(code).await.unwrap();
 
         assert_eq!(0, te.wait_count.load(Ordering::SeqCst));
         assert_eq!(0, te.set_count.load(Ordering::SeqCst));
@@ -401,8 +279,8 @@ mod tests {
                 .collect::<Vec<(String, String)>>(),
         );
     }
-    #[test]
-    fn test_wait() {
+    #[tokio::test]
+    async fn test_wait() {
         let source = "
         wait 1s print \"done\"
 ";
@@ -410,8 +288,8 @@ mod tests {
         log::debug!("code:     {:?}", code);
 
         let te = TestEngine::new();
-        let mut vm = VM::new(code, te.clone());
-        vm.run();
+        let vm = VM::new(te.clone());
+        vm.run(code).await.unwrap();
 
         assert_eq!(0, te.when_count.load(Ordering::SeqCst));
         assert_eq!(0, te.set_count.load(Ordering::SeqCst));
@@ -426,8 +304,8 @@ mod tests {
                 .collect::<Vec<Duration>>(),
         );
     }
-    #[test]
-    fn test_set() {
+    #[tokio::test]
+    async fn test_set() {
         let source = "
         set path/to/value \"on\"
 ";
@@ -435,8 +313,8 @@ mod tests {
         log::debug!("code:     {:?}", code);
 
         let te = TestEngine::new();
-        let mut vm = VM::new(code, te.clone());
-        vm.run();
+        let vm = VM::new(te.clone());
+        vm.run(code).await.unwrap();
 
         assert_eq!(0, te.when_count.load(Ordering::SeqCst));
         assert_eq!(0, te.get_count.load(Ordering::SeqCst));
@@ -452,8 +330,8 @@ mod tests {
                 .collect::<Vec<(String, String)>>(),
         );
     }
-    #[test]
-    fn test_get() {
+    #[tokio::test]
+    async fn test_get() {
         let source = "
         get path/to/value
 ";
@@ -461,8 +339,8 @@ mod tests {
         log::debug!("code:     {:?}", code);
 
         let te = TestEngine::new();
-        let mut vm = VM::new(code, te.clone());
-        vm.run();
+        let vm = VM::new(te.clone());
+        vm.run(code).await.unwrap();
 
         assert_eq!(0, te.when_count.load(Ordering::SeqCst));
         assert_eq!(0, te.wait_count.load(Ordering::SeqCst));
@@ -478,8 +356,8 @@ mod tests {
                 .collect::<Vec<String>>(),
         );
     }
-    #[test]
-    fn test_many_threads() {
+    #[tokio::test]
+    async fn test_many_threads() {
         let source = "
         wait 5s print \"a\"
         wait 4s print \"b\"
@@ -491,8 +369,8 @@ mod tests {
         log::debug!("code:     {:?}", code);
 
         let te = TestEngine::new();
-        let mut vm = VM::new(code, te.clone());
-        vm.run();
+        let vm = VM::new(te.clone());
+        vm.run(code).await.unwrap();
 
         assert_eq!(0, te.when_count.load(Ordering::SeqCst));
         assert_eq!(0, te.set_count.load(Ordering::SeqCst));
