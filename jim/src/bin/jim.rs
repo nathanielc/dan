@@ -1,7 +1,7 @@
 use env_logger;
 use jim::{compiler::Interpreter, mqtt_engine::MQTTEngine, vm::VM, Compile, Result};
 use std::io::{self, Read};
-use tokio::{signal, sync::broadcast};
+use tokio::{select, signal, sync::broadcast};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -11,19 +11,27 @@ async fn main() -> Result<()> {
     io::stdin().read_to_string(&mut input)?;
 
     let (shutdown_tx, shutdown_rx) = broadcast::channel(2);
+    let mut shutdown_rx2 = shutdown_rx.resubscribe();
+    let shutdown_tx2 = shutdown_tx.clone();
     tokio::spawn(async move {
         run(input.as_str(), shutdown_rx).await.unwrap();
+        shutdown_tx2.send(()).unwrap();
     });
 
-    match signal::ctrl_c().await {
-        Ok(()) => {}
-        Err(err) => {
-            log::error!("unable to listen for shutdown signal: {}", err);
-            // we also shut down in case of error
+    select! {
+        sig = signal::ctrl_c() => {
+            match sig {
+                Ok(()) => {}
+                Err(err) => {
+                    log::error!("unable to listen for shutdown signal: {}", err);
+                    // we also shut down in case of error
+                }
+            }
         }
-    }
+        _ = shutdown_rx2.recv() => {}
+    };
     // Send shutdown signal
-    shutdown_tx.send(())?;
+    let _ = shutdown_tx.send(());
     Ok(())
 }
 

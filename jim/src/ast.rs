@@ -16,4 +16,7 @@ pub enum Stmt {
     Wait(Expr, Box<Stmt>),
     Expr(Expr),
     Print(Expr),
+    Scene(String, Box<Stmt>),
+    Start(String),
+    Stop(String),
 }

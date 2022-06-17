@@ -13,6 +13,7 @@ pub enum Value {
     Str(String),
     Path(String),
     Duration(Duration),
+    Jump(usize),
 }
 
 impl Display for Value {
@@ -21,6 +22,7 @@ impl Display for Value {
             Value::Str(s) => f.write_str(s.as_str()),
             Value::Path(s) => f.write_str(s.as_str()),
             Value::Duration(d) => write!(f, "{:?}", d),
+            Value::Jump(ip) => write!(f, "jmp: {:?}", ip),
         }
     }
 }
@@ -55,17 +57,21 @@ impl TryFrom<Expr> for Value {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Instruction {
-    Constant(u16),
+    Constant(usize),
     Print,
     Pick(usize),
     Pop,
     Spawn(usize),
     Jump(usize),
+    Call,
+    Return,
     Term,
     When,
     Wait,
     Set,
     Get,
+    Stop,
+    SceneContext,
 }
 
 #[derive(Debug, PartialEq)]
@@ -131,13 +137,13 @@ impl Compile for Interpreter {
 }
 
 impl Interpreter {
-    fn add_constant(&mut self, value: Value) -> u16 {
+    fn add_constant(&mut self, value: Value) -> usize {
         self.code.constants.push(value);
-        (self.code.constants.len() - 1) as u16 // cast to u16 because that is the size of our constant pool index
+        self.code.constants.len() - 1
     }
 
-    fn add_instruction(&mut self, inst: Instruction) -> u16 {
-        let position_of_new_instruction = self.code.instructions.len() as u16;
+    fn add_instruction(&mut self, inst: Instruction) -> usize {
+        let position_of_new_instruction = self.code.instructions.len();
         self.code.instructions.push(inst);
         position_of_new_instruction
     }
@@ -218,6 +224,55 @@ impl Interpreter {
             Stmt::Expr(expr) => {
                 self.interpret_expr(env, expr);
                 self.add_instruction(Instruction::Pop);
+            }
+            Stmt::Scene(id, stmt) => {
+                // Scenes are an implicit definition of two functions:
+                // a start and a stop function.
+                env.values.insert(id.clone(), env.depth);
+                env.depth += 1;
+                let start_jump_const =
+                    self.add_constant(Value::Jump(self.code.instructions.len() + 3));
+                self.add_instruction(Instruction::Constant(start_jump_const));
+
+                env.values.insert(id + " stop", env.depth);
+                env.depth += 1;
+                let stop_jump_const = self.add_constant(Value::Jump(0)); // we need to backpatch this jump location
+                self.add_instruction(Instruction::Constant(stop_jump_const));
+
+                let continue_jump = self.add_instruction(Instruction::Jump(0)); // we need to backpatch this jump location
+
+                // Add scene body
+                self.add_instruction(Instruction::SceneContext);
+                self.interpret_stmt(env, *stmt);
+                self.add_instruction(Instruction::Return);
+
+                // Add scene stop body
+                let stop_jump_ip = self.add_instruction(Instruction::Stop);
+                self.add_instruction(Instruction::Return);
+
+                // Backpatch jump constant
+                if let Some(Value::Jump(ip)) = self.code.constants.get_mut(stop_jump_const as usize)
+                {
+                    *ip = stop_jump_ip as usize;
+                } else {
+                    panic!("missing stop jump value")
+                }
+
+                // Backpatch the continue jump pointer
+                let l = self.code.instructions.len();
+                if let Some(Instruction::Jump(ip)) = self.code.instructions.get_mut(continue_jump) {
+                    *ip = l;
+                } else {
+                    panic!("missing continue jump instruction")
+                }
+            }
+            Stmt::Start(id) => {
+                self.interpret_expr(env, Expr::Ident(id));
+                self.add_instruction(Instruction::Call);
+            }
+            Stmt::Stop(id) => {
+                self.interpret_expr(env, Expr::Ident(id + " stop"));
+                self.add_instruction(Instruction::Call);
             }
         };
     }
@@ -533,6 +588,40 @@ print x
                     Instruction::Term
                 ],
                 constants: vec![Value::Path("path/to/value".to_string()),],
+            },
+            code
+        );
+    }
+    #[test]
+    fn test_scene() {
+        let source = "
+        scene night print \"x\"
+        start night
+        stop night
+";
+        let code = Interpreter::from_source(source);
+        log::debug!("code:     {:?}", code);
+        assert_eq!(
+            Code {
+                instructions: vec![
+                    Instruction::Constant(0), // Jump address of scene start code
+                    Instruction::Constant(1), // Jump address of scene stop code
+                    Instruction::Jump(9),
+                    Instruction::SceneContext, // Scene start
+                    Instruction::Constant(2),
+                    Instruction::Print,
+                    Instruction::Return,
+                    Instruction::Stop, // Scene stop
+                    Instruction::Return,
+                    Instruction::Pick(1), // Start
+                    Instruction::Call,
+                    Instruction::Pick(0), // Stop
+                    Instruction::Call,
+                    Instruction::Pop, // pop the scene start out of scope
+                    Instruction::Pop, // pop the scene stop out of scope
+                    Instruction::Term
+                ],
+                constants: vec![Value::Jump(3), Value::Jump(7), Value::Str("x".to_string()),],
             },
             code
         );
