@@ -60,6 +60,7 @@ pub enum Instruction {
     Pick(usize),
     Pop,
     Spawn(usize),
+    Jump(usize),
     Term,
     When,
     Wait,
@@ -172,30 +173,8 @@ impl Interpreter {
                 self.add_instruction(Instruction::When);
                 // Add stmt
                 self.interpret_stmt(env, *stmt);
-                // Terminate the spawned thread
-                self.add_instruction(Instruction::Term);
-
-                // backpatch the spawn jump pointer
-                let l = self.code.instructions.len();
-                if let Some(Instruction::Spawn(ip)) =
-                    self.code.instructions.get_mut(spawn_ip as usize)
-                {
-                    *ip = l;
-                } else {
-                    panic!("missing spawn instruction")
-                }
-            }
-            Stmt::Set(path, expr) => {
-                let spawn_ip = self.add_instruction(Instruction::Spawn(usize::MAX));
-                // Add path
-                let const_index = self.add_constant(Value::Path(path));
-                self.add_instruction(Instruction::Constant(const_index));
-                // Add expr
-                self.interpret_expr(env, expr);
-                // Watch, creates a promise
-                self.add_instruction(Instruction::Set);
-                // Terminate the spawned thread
-                self.add_instruction(Instruction::Term);
+                // Loop the spawned thread back to the beginning
+                self.add_instruction(Instruction::Jump(spawn_ip as usize + 1));
 
                 // backpatch the spawn jump pointer
                 let l = self.code.instructions.len();
@@ -227,6 +206,14 @@ impl Interpreter {
                 } else {
                     panic!("missing spawn instruction")
                 }
+            }
+            Stmt::Set(path, expr) => {
+                let const_index = self.add_constant(Value::Path(path));
+                self.add_instruction(Instruction::Constant(const_index));
+                // Add expr
+                self.interpret_expr(env, expr);
+                // Watch, creates a promise
+                self.add_instruction(Instruction::Set);
             }
             Stmt::Expr(expr) => {
                 self.interpret_expr(env, expr);
@@ -469,7 +456,7 @@ print x
                     Instruction::When,
                     Instruction::Constant(2),
                     Instruction::Print,
-                    Instruction::Term,
+                    Instruction::Jump(1),
                     Instruction::Term,
                 ],
                 constants: vec![
@@ -517,11 +504,9 @@ print x
         assert_eq!(
             Code {
                 instructions: vec![
-                    Instruction::Spawn(5),
                     Instruction::Constant(0),
                     Instruction::Constant(1),
                     Instruction::Set,
-                    Instruction::Term,
                     Instruction::Term,
                 ],
                 constants: vec![
