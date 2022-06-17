@@ -1,10 +1,8 @@
-set masterbedroom/lights "off"
-set masterbedroom/lights "on"
+wait 1s set masterbedroom/lights "on"
+when masterbedroom/lights is "on" set masterbedroom/heater "on"
 
 set downstairs/lights "50"
 
 let bed_lights = "lights"
 
 set downstairs/lights bed_lights
-
-
