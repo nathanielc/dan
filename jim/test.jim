@@ -1,8 +1,14 @@
-wait 1s set masterbedroom/lights "on"
-when masterbedroom/lights is "on" set masterbedroom/heater "on"
+wait 5s set masterbedroom/lights "on"
 
-set downstairs/lights "50"
+scene lights {
+    when masterbedroom/lights is "on" set masterbedroom/heater "on"
 
-let bed_lights = "lights"
+    set downstairs/lights "50"
 
-set downstairs/lights bed_lights
+    let bed_lights = "lights"
+
+    set downstairs/lights bed_lights
+}
+
+start lights
+wait 1s stop lights

@@ -28,6 +28,9 @@ peg::parser!(pub grammar parser() for str {
         / let()
         / when()
         / wait()
+        / scene()
+        / start()
+        / stop()
         / e:expression() { Stmt::Expr(e) }
 
     rule block() -> Stmt
@@ -53,6 +56,15 @@ peg::parser!(pub grammar parser() for str {
         =  _ "wait" _
             d:duration() _
             s:statement() _ { Stmt::Wait(d, Box::new(s)) }
+
+    rule scene() -> Stmt
+        = _ "scene" _ i:identifier()  _ s:statement() _ { Stmt::Scene(i, Box::new(s)) }
+
+    rule start() -> Stmt
+        = _ "start" _ i:identifier() _ { Stmt::Start(i) }
+
+    rule stop() -> Stmt
+        = _ "stop" _ i:identifier() _ { Stmt::Stop(i) }
 
     rule expression() -> Expr
         = get()

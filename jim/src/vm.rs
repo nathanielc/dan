@@ -35,7 +35,10 @@ struct Thread<E: Engine> {
     ip: usize,
     stack: [Value; STACK_SIZE],
     stack_ptr: usize, // points to the next free space
+    call_stack: Vec<usize>,
     sender: Sender<JoinHandle<Result<()>>>,
+    cancel_rx: broadcast::Receiver<()>,
+    cancel_tx: broadcast::Sender<()>,
 }
 
 impl<E: Engine> fmt::Debug for Thread<E> {
@@ -59,13 +62,17 @@ impl<E: Engine + 'static> Thread<E> {
         ip: usize,
         sender: Sender<JoinHandle<Result<()>>>,
     ) -> Thread<E> {
+        let (cancel_tx, cancel_rx) = broadcast::channel(1);
         Thread {
             engine,
             code,
             ip,
             stack: unsafe { std::mem::zeroed() },
             stack_ptr: 0,
+            call_stack: Vec::new(),
             sender,
+            cancel_rx,
+            cancel_tx,
         }
     }
     fn from_spawn(&self, ip: usize) -> Thread<E> {
@@ -75,7 +82,10 @@ impl<E: Engine + 'static> Thread<E> {
             ip,
             stack: self.stack.clone(),
             stack_ptr: self.stack_ptr,
+            call_stack: Vec::new(),
             sender: self.sender.clone(),
+            cancel_rx: self.cancel_rx.resubscribe(),
+            cancel_tx: self.cancel_tx.clone(),
         }
     }
     pub fn pick(&mut self, depth: usize) {
@@ -101,6 +111,7 @@ impl<E: Engine + 'static> Thread<E> {
     }
     async fn _run(mut self, mut shutdown: broadcast::Receiver<()>) -> Result<()> {
         loop {
+            let mut cancel_rx = self.cancel_rx.resubscribe();
             select! {
                 // TODO: Restructure so that we do not have to pre-emptively resubsribe for each
                 // step
@@ -111,6 +122,7 @@ impl<E: Engine + 'static> Thread<E> {
                     }
                 },
                 _ = shutdown.recv() => break,
+                _ = cancel_rx.recv() => break,
             }
         }
         Ok(())
@@ -180,7 +192,25 @@ impl<E: Engine + 'static> Thread<E> {
                     }
                 };
             }
-        }
+            Instruction::Call => {
+                self.call_stack.push(self.ip);
+                self.ip = match self.pop() {
+                    Value::Jump(ip) => ip,
+                    _ => panic!("call pointer not a jump value"),
+                };
+            }
+            Instruction::Return => {
+                self.ip = self.call_stack.pop().unwrap();
+            }
+            Instruction::SceneContext => {
+                let (cancel_tx, cancel_rx) = broadcast::channel(1);
+                self.cancel_rx = cancel_rx;
+                self.cancel_tx = cancel_tx;
+            }
+            Instruction::Stop => {
+                self.cancel_tx.send(()).unwrap();
+            }
+        };
         Ok(StepResult::Continue)
     }
 }
@@ -207,7 +237,7 @@ impl<E: Engine + 'static> VM<E> {
                 _ = handle => {
                     main = None;
                 },
-                _ = shutdown.recv() => break,
+                //_ = shutdown.recv() => break,
                 };
             }
             select! {
@@ -375,115 +405,142 @@ mod tests {
                 .drain(..)
                 .collect::<Vec<(String, String)>>(),
         );
-        shutdown.send(()).unwrap();
+        let _  = shutdown.send(());
     }
-    //    #[tokio::test]
-    //    async fn test_wait() {
-    //        let source = "
-    //        wait 1s print \"done\"
-    //";
-    //        let code = Interpreter::from_source(source);
-    //        log::debug!("code:     {:?}", code);
-    //
-    //        let (te, shutdown) = run_vm(code).await;
-    //        shutdown.send(()).unwrap();
-    //
-    //        assert_eq!(0, te.when_count.load(Ordering::SeqCst));
-    //        assert_eq!(0, te.set_count.load(Ordering::SeqCst));
-    //        assert_eq!(0, te.get_count.load(Ordering::SeqCst));
-    //        assert_eq!(1, te.wait_count.load(Ordering::SeqCst));
-    //        assert_eq!(
-    //            vec![Duration::from_secs(1),],
-    //            te.wait_args
-    //                .lock()
-    //                .unwrap()
-    //                .drain(..)
-    //                .collect::<Vec<Duration>>(),
-    //        );
-    //        shutdown.send(()).unwrap();
-    //    }
-    //    #[tokio::test]
-    //    async fn test_set() {
-    //        let source = "
-    //        set path/to/value \"on\"
-    //";
-    //        let code = Interpreter::from_source(source);
-    //        log::debug!("code:     {:?}", code);
-    //
-    //        let (te, shutdown) = run_vm(code).await;
-    //
-    //        assert_eq!(0, te.when_count.load(Ordering::SeqCst));
-    //        assert_eq!(0, te.get_count.load(Ordering::SeqCst));
-    //        assert_eq!(0, te.wait_count.load(Ordering::SeqCst));
-    //
-    //        assert_eq!(1, te.set_count.load(Ordering::SeqCst));
-    //        assert_eq!(
-    //            vec![("path/to/value".to_string(), "on".to_string())],
-    //            te.set_args
-    //                .lock()
-    //                .unwrap()
-    //                .drain(..)
-    //                .collect::<Vec<(String, String)>>(),
-    //        );
-    //        shutdown.send(()).unwrap();
-    //    }
-    //    #[tokio::test]
-    //    async fn test_get() {
-    //        let source = "
-    //        get path/to/value
-    //";
-    //        let code = Interpreter::from_source(source);
-    //        log::debug!("code:     {:?}", code);
-    //
-    //        let (te, shutdown) = run_vm(code).await;
-    //
-    //        assert_eq!(0, te.when_count.load(Ordering::SeqCst));
-    //        assert_eq!(0, te.wait_count.load(Ordering::SeqCst));
-    //        assert_eq!(0, te.set_count.load(Ordering::SeqCst));
-    //
-    //        assert_eq!(1, te.get_count.load(Ordering::SeqCst));
-    //        assert_eq!(
-    //            vec!["path/to/value".to_string()],
-    //            te.get_args
-    //                .lock()
-    //                .unwrap()
-    //                .drain(..)
-    //                .collect::<Vec<String>>(),
-    //        );
-    //        shutdown.send(()).unwrap();
-    //    }
-    //    #[tokio::test]
-    //    async fn test_many_threads() {
-    //        let source = "
-    //        wait 5s print \"a\"
-    //        wait 4s print \"b\"
-    //        wait 3s print \"c\"
-    //        wait 2s print \"d\"
-    //        wait 1s print \"e\"
-    //";
-    //        let code = Interpreter::from_source(source);
-    //        log::debug!("code:     {:?}", code);
-    //
-    //        let (te, shutdown) = run_vm(code).await;
-    //
-    //        assert_eq!(0, te.when_count.load(Ordering::SeqCst));
-    //        assert_eq!(0, te.set_count.load(Ordering::SeqCst));
-    //        assert_eq!(0, te.get_count.load(Ordering::SeqCst));
-    //        assert_eq!(5, te.wait_count.load(Ordering::SeqCst));
-    //        assert_eq!(
-    //            vec![
-    //                Duration::from_secs(5),
-    //                Duration::from_secs(4),
-    //                Duration::from_secs(3),
-    //                Duration::from_secs(2),
-    //                Duration::from_secs(1),
-    //            ],
-    //            te.wait_args
-    //                .lock()
-    //                .unwrap()
-    //                .drain(..)
-    //                .collect::<Vec<Duration>>(),
-    //        );
-    //        shutdown.send(()).unwrap();
-    //    }
+    #[tokio::test]
+    async fn test_wait() {
+        let source = "
+            wait 1s print \"done\"
+    ";
+        let code = Interpreter::from_source(source);
+        log::debug!("code:     {:?}", code);
+
+        let (te, shutdown) = run_vm(code);
+        // TODO: remove this sleep
+        time::sleep(Duration::from_millis(100)).await;
+
+        assert_eq!(0, te.when_count.load(Ordering::SeqCst));
+        assert_eq!(0, te.set_count.load(Ordering::SeqCst));
+        assert_eq!(0, te.get_count.load(Ordering::SeqCst));
+        assert_eq!(1, te.wait_count.load(Ordering::SeqCst));
+        assert_eq!(
+            vec![Duration::from_secs(1),],
+            te.wait_args
+                .lock()
+                .unwrap()
+                .drain(..)
+                .collect::<Vec<Duration>>(),
+        );
+        let _  = shutdown.send(());
+    }
+    #[tokio::test]
+    async fn test_set() {
+        let source = "
+            set path/to/value \"on\"
+    ";
+        let code = Interpreter::from_source(source);
+        log::debug!("code:     {:?}", code);
+
+        let (te, shutdown) = run_vm(code);
+        // TODO: remove this sleep
+        time::sleep(Duration::from_millis(100)).await;
+
+        assert_eq!(0, te.when_count.load(Ordering::SeqCst));
+        assert_eq!(0, te.get_count.load(Ordering::SeqCst));
+        assert_eq!(0, te.wait_count.load(Ordering::SeqCst));
+
+        assert_eq!(1, te.set_count.load(Ordering::SeqCst));
+        assert_eq!(
+            vec![("path/to/value".to_string(), "on".to_string())],
+            te.set_args
+                .lock()
+                .unwrap()
+                .drain(..)
+                .collect::<Vec<(String, String)>>(),
+        );
+        let _  = shutdown.send(());
+    }
+    #[tokio::test]
+    async fn test_get() {
+        let source = "
+            get path/to/value
+    ";
+        let code = Interpreter::from_source(source);
+        log::debug!("code:     {:?}", code);
+
+        let (te, shutdown) = run_vm(code);
+        // TODO: remove this sleep
+        time::sleep(Duration::from_millis(100)).await;
+
+        assert_eq!(0, te.when_count.load(Ordering::SeqCst));
+        assert_eq!(0, te.wait_count.load(Ordering::SeqCst));
+        assert_eq!(0, te.set_count.load(Ordering::SeqCst));
+
+        assert_eq!(1, te.get_count.load(Ordering::SeqCst));
+        assert_eq!(
+            vec!["path/to/value".to_string()],
+            te.get_args
+                .lock()
+                .unwrap()
+                .drain(..)
+                .collect::<Vec<String>>(),
+        );
+        let _  = shutdown.send(());
+    }
+    #[tokio::test]
+    async fn test_many_threads() {
+        let source = "
+            wait 5s print \"a\"
+            wait 4s print \"b\"
+            wait 3s print \"c\"
+            wait 2s print \"d\"
+            wait 1s print \"e\"
+    ";
+        let code = Interpreter::from_source(source);
+        log::debug!("code:     {:?}", code);
+
+        let (te, shutdown) = run_vm(code);
+        // TODO: remove this sleep
+        time::sleep(Duration::from_millis(100)).await;
+
+        assert_eq!(0, te.when_count.load(Ordering::SeqCst));
+        assert_eq!(0, te.set_count.load(Ordering::SeqCst));
+        assert_eq!(0, te.get_count.load(Ordering::SeqCst));
+        assert_eq!(5, te.wait_count.load(Ordering::SeqCst));
+        assert_eq!(
+            vec![
+                Duration::from_secs(5),
+                Duration::from_secs(4),
+                Duration::from_secs(3),
+                Duration::from_secs(2),
+                Duration::from_secs(1),
+            ],
+            te.wait_args
+                .lock()
+                .unwrap()
+                .drain(..)
+                .collect::<Vec<Duration>>(),
+        );
+        let _  = shutdown.send(());
+    }
+    #[tokio::test]
+    async fn test_scene() {
+        let source = "
+        scene night print \"x\"
+        start night
+        stop night
+    ";
+        let code = Interpreter::from_source(source);
+        log::debug!("code:     {:?}", code);
+
+        let (te, shutdown) = run_vm(code);
+        // TODO: remove this sleep
+        time::sleep(Duration::from_millis(100)).await;
+
+        assert_eq!(0, te.when_count.load(Ordering::SeqCst));
+        assert_eq!(0, te.set_count.load(Ordering::SeqCst));
+        assert_eq!(0, te.get_count.load(Ordering::SeqCst));
+        assert_eq!(0, te.wait_count.load(Ordering::SeqCst));
+        let _ = shutdown.send(());
+    }
 }
