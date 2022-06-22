@@ -35,11 +35,9 @@ enum SelectResult {
 }
 
 impl MQTTEngine {
-    pub fn new() -> Result<Arc<Self>> {
+    pub fn new(url: &str) -> Result<Arc<Self>> {
         // Create a client & define connect options
-        let cli = Client::builder()
-            .set_url_string("mqtt://localhost")?
-            .build()?;
+        let cli = Client::builder().set_url_string(url)?.build()?;
 
         let (requests_tx, requests_rx) = mpsc::channel(100);
         tokio::spawn(async move {
@@ -59,22 +57,16 @@ impl MQTTEngine {
             };
             match s {
                 SelectResult::Request(req) => match req {
-                    Some(Request::Watch(watch)) => {
-                        log::debug!("new watch: {:?}", &watch);
-                        watches.push(watch)
-                    }
+                    Some(Request::Watch(watch)) => watches.push(watch),
                     Some(Request::Publish(p)) => {
-                        log::debug!("new publish");
                         cli.publish(&p).await?;
                     }
                     Some(Request::Subscribe(s)) => {
-                        log::debug!("new subscribe");
                         cli.subscribe(s).await?;
                     }
                     None => break,
                 },
                 SelectResult::Data(data) => {
-                    log::debug!("new data: {:?}", &data);
                     let mut i = 0 as usize;
                     while i < watches.len() {
                         if data.topic() == watches[i].path
@@ -100,11 +92,9 @@ impl Engine for Arc<MQTTEngine> {
             topic_path: path.to_string(),
             qos: QoS::AtLeastOnce,
         }]);
-        log::debug!("sending subscribe {:?}", path);
         self.requests_tx.send(Request::Subscribe(s)).await?;
 
         let (tx, rx) = oneshot::channel();
-        log::debug!("sending watch {:?}", path);
         self.requests_tx
             .send(Request::Watch(Watch {
                 path: path.to_string(),

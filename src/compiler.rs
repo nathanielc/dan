@@ -13,6 +13,7 @@ pub enum Value {
     Str(String),
     Path(String),
     Duration(Duration),
+    Time(TimeOfDay),
     Jump(usize),
 }
 
@@ -22,6 +23,7 @@ impl Display for Value {
             Value::Str(s) => f.write_str(s.as_str()),
             Value::Path(s) => f.write_str(s.as_str()),
             Value::Duration(d) => write!(f, "{:?}", d),
+            Value::Time(t) => write!(f, "{}", t),
             Value::Jump(ip) => write!(f, "jmp: {:?}", ip),
         }
     }
@@ -50,7 +52,59 @@ impl TryFrom<Expr> for Value {
                 let duration = Duration::from_secs(s.parse().unwrap());
                 Ok(Value::Duration(duration))
             }
+            Expr::Time(t) => match t.as_str() {
+                "sunrise" => Ok(Value::Time(TimeOfDay::Sunrise)),
+                "sunset" => Ok(Value::Time(TimeOfDay::Sunset)),
+                _ => {
+                    let mut hours = 0;
+                    let time = if let Some(time) = t.strip_suffix("PM") {
+                        hours += 12;
+                        time
+                    } else if let Some(time) = t.strip_suffix("PM") {
+                        time
+                    } else {
+                        panic!("parser failed to enforce AM/PM ending to time")
+                    };
+                    let parts: Vec<&str> = time.split(":").collect();
+                    if parts.len() != 2 {
+                        panic!("parser failed to HH:MM time format")
+                    }
+                    let h: u32 = parts
+                        .first()
+                        .unwrap()
+                        .parse()
+                        .expect("parser failed to enforce integer hours");
+                    if h == hours {
+                        // 12PM is noon
+                        hours = 0;
+                    }
+                    let m: u32 = parts
+                        .last()
+                        .unwrap()
+                        .parse()
+                        .expect("parser failed to enforce integer minutes");
+
+                    Ok(Value::Time(TimeOfDay::HM(hours + h, m)))
+                }
+            },
             _ => Err(anyhow!("expression is not a literal value")),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum TimeOfDay {
+    Sunrise,
+    Sunset,
+    HM(u32, u32),
+}
+
+impl Display for TimeOfDay {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TimeOfDay::Sunrise => f.write_str("sunrise"),
+            TimeOfDay::Sunset => f.write_str("sunset"),
+            TimeOfDay::HM(h, m) => write!(f, "{}:{}", h, m),
         }
     }
 }
@@ -68,6 +122,7 @@ pub enum Instruction {
     Term,
     When,
     Wait,
+    At,
     Set,
     Get,
     Stop,
@@ -236,10 +291,10 @@ impl Interpreter {
 
                 env.values.insert(id + " stop", env.depth);
                 env.depth += 1;
-                let stop_jump_const = self.add_constant(Value::Jump(0)); // we need to backpatch this jump location
+                let stop_jump_const = self.add_constant(Value::Jump(usize::MAX)); // we need to backpatch this jump location
                 self.add_instruction(Instruction::Constant(stop_jump_const));
 
-                let continue_jump = self.add_instruction(Instruction::Jump(0)); // we need to backpatch this jump location
+                let continue_jump = self.add_instruction(Instruction::Jump(usize::MAX)); // we need to backpatch this jump location
 
                 // Add scene body
                 self.add_instruction(Instruction::SceneContext);
@@ -274,6 +329,26 @@ impl Interpreter {
                 self.interpret_expr(env, Expr::Ident(id + " stop"));
                 self.add_instruction(Instruction::Call);
             }
+            Stmt::At(expr, stmt) => {
+                let spawn_ip = self.add_instruction(Instruction::Spawn(usize::MAX));
+                self.interpret_expr(env, expr);
+                self.add_instruction(Instruction::At);
+                self.interpret_stmt(env, *stmt);
+
+                // Loop the spawned thread back to the beginning
+                self.add_instruction(Instruction::Jump(spawn_ip as usize + 1));
+
+                // backpatch the spawn jump pointer
+                let l = self.code.instructions.len();
+                if let Some(Instruction::Spawn(ip)) =
+                    self.code.instructions.get_mut(spawn_ip as usize)
+                {
+                    *ip = l;
+                } else {
+                    panic!("missing spawn instruction")
+                }
+            }
+            Stmt::Func(..) => todo!(),
         };
     }
     fn interpret_expr<'a>(&mut self, env: &mut Env<'a>, expr: Expr) {
@@ -292,7 +367,7 @@ impl Interpreter {
                 // Watch, creates a promise
                 self.add_instruction(Instruction::Get);
             }
-            Expr::String(_) | Expr::Duration(_) => {
+            Expr::String(_) | Expr::Duration(_) | Expr::Time(_) => {
                 let const_index = self.add_constant(expr.try_into().unwrap());
                 self.add_instruction(Instruction::Constant(const_index));
             }
@@ -622,6 +697,116 @@ print x
                     Instruction::Term
                 ],
                 constants: vec![Value::Jump(3), Value::Jump(7), Value::Str("x".to_string()),],
+            },
+            code
+        );
+    }
+    #[test]
+    fn test_at() {
+        let source = "
+        at 12:50PM print \"x\"
+";
+        let code = Interpreter::from_source(source);
+        log::debug!("code:     {:?}", code);
+        assert_eq!(
+            Code {
+                instructions: vec![
+                    Instruction::Spawn(6),
+                    Instruction::Constant(0),
+                    Instruction::At,
+                    Instruction::Constant(1),
+                    Instruction::Print,
+                    Instruction::Jump(1),
+                    Instruction::Term,
+                ],
+                constants: vec![
+                    Value::Time(TimeOfDay::HM(12, 50)),
+                    Value::Str("x".to_string()),
+                ],
+            },
+            code
+        );
+    }
+    #[test]
+    fn test_func_no_args() {
+        let source = "
+        fn foo () => {
+            \"a\"
+        }
+";
+        let code = Interpreter::from_source(source);
+        log::debug!("code:     {:?}", code);
+        assert_eq!(
+            Code {
+                instructions: vec![
+                    Instruction::Spawn(6),
+                    Instruction::Constant(0),
+                    Instruction::At,
+                    Instruction::Constant(1),
+                    Instruction::Print,
+                    Instruction::Jump(1),
+                    Instruction::Term,
+                ],
+                constants: vec![
+                    Value::Time(TimeOfDay::HM(12, 50)),
+                    Value::Str("x".to_string()),
+                ],
+            },
+            code
+        );
+    }
+    #[test]
+    fn test_func_one_arg() {
+        let source = "
+        fn foo (a) => {
+            \"a\"
+        }
+";
+        let code = Interpreter::from_source(source);
+        log::debug!("code:     {:?}", code);
+        assert_eq!(
+            Code {
+                instructions: vec![
+                    Instruction::Spawn(6),
+                    Instruction::Constant(0),
+                    Instruction::At,
+                    Instruction::Constant(1),
+                    Instruction::Print,
+                    Instruction::Jump(1),
+                    Instruction::Term,
+                ],
+                constants: vec![
+                    Value::Time(TimeOfDay::HM(12, 50)),
+                    Value::Str("x".to_string()),
+                ],
+            },
+            code
+        );
+    }
+    #[test]
+    fn test_func_args() {
+        let source = "
+        fn foo (a,b,c) => {
+            \"a\"
+        }
+";
+        let code = Interpreter::from_source(source);
+        log::debug!("code:     {:?}", code);
+        assert_eq!(
+            Code {
+                instructions: vec![
+                    Instruction::Spawn(6),
+                    Instruction::Constant(0),
+                    Instruction::At,
+                    Instruction::Constant(1),
+                    Instruction::Print,
+                    Instruction::Jump(1),
+                    Instruction::Term,
+                ],
+                constants: vec![
+                    Value::Time(TimeOfDay::HM(12, 50)),
+                    Value::Str("x".to_string()),
+                ],
             },
             code
         );

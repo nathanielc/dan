@@ -1,6 +1,7 @@
 use {
     anyhow::Result,
     async_trait::async_trait,
+    chrono::{DateTime, Local},
     futures::future::{BoxFuture, FutureExt},
     std::{convert::TryInto, fmt, sync::Arc, time::Duration},
     tokio::{
@@ -14,7 +15,7 @@ use {
     },
 };
 
-use crate::compiler::{Code, Instruction, Value};
+use crate::compiler::{Code, Instruction, TimeOfDay, Value};
 
 const STACK_SIZE: usize = 512;
 
@@ -209,6 +210,29 @@ impl<E: Engine + 'static> Thread<E> {
             }
             Instruction::Stop => {
                 self.cancel_tx.send(()).unwrap();
+            }
+            Instruction::At => {
+                let v = self.pop();
+                match v {
+                    Value::Time(t) => {
+                        let then: DateTime<Local> = match t {
+                            TimeOfDay::Sunrise => todo!(),
+                            TimeOfDay::Sunset => todo!(),
+                            TimeOfDay::HM(h, m) => Local::today().and_hms(h, m, 0),
+                        };
+                        let now: DateTime<Local> = Local::now();
+                        let mut diff = then.timestamp() - now.timestamp();
+                        if diff <= 0 {
+                            // If the time has passed today wait for the next one.
+                            diff += 24 * 60 * 60;
+                        }
+                        let d = Duration::from_secs(diff as u64);
+                        self.engine.wait(d).await?;
+                    }
+                    _ => {
+                        panic!("at arg must be a time")
+                    }
+                };
             }
         };
         Ok(StepResult::Continue)
@@ -405,7 +429,7 @@ mod tests {
                 .drain(..)
                 .collect::<Vec<(String, String)>>(),
         );
-        let _  = shutdown.send(());
+        let _ = shutdown.send(());
     }
     #[tokio::test]
     async fn test_wait() {
@@ -431,7 +455,7 @@ mod tests {
                 .drain(..)
                 .collect::<Vec<Duration>>(),
         );
-        let _  = shutdown.send(());
+        let _ = shutdown.send(());
     }
     #[tokio::test]
     async fn test_set() {
@@ -458,7 +482,7 @@ mod tests {
                 .drain(..)
                 .collect::<Vec<(String, String)>>(),
         );
-        let _  = shutdown.send(());
+        let _ = shutdown.send(());
     }
     #[tokio::test]
     async fn test_get() {
@@ -485,7 +509,7 @@ mod tests {
                 .drain(..)
                 .collect::<Vec<String>>(),
         );
-        let _  = shutdown.send(());
+        let _ = shutdown.send(());
     }
     #[tokio::test]
     async fn test_many_threads() {
@@ -521,7 +545,7 @@ mod tests {
                 .drain(..)
                 .collect::<Vec<Duration>>(),
         );
-        let _  = shutdown.send(());
+        let _ = shutdown.send(());
     }
     #[tokio::test]
     async fn test_scene() {
