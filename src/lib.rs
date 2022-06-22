@@ -1,6 +1,7 @@
 pub mod ast;
 pub mod compiler;
 pub mod mqtt_engine;
+//pub mod sun;
 pub mod vm;
 
 pub type Result<T> = anyhow::Result<T>;
@@ -28,9 +29,11 @@ peg::parser!(pub grammar parser() for str {
         / let()
         / when()
         / wait()
+        / at()
         / scene()
         / start()
         / stop()
+        / func()
         / e:expression() { Stmt::Expr(e) }
 
     rule block() -> Stmt
@@ -57,6 +60,9 @@ peg::parser!(pub grammar parser() for str {
             d:duration() _
             s:statement() _ { Stmt::Wait(d, Box::new(s)) }
 
+    rule at() -> Stmt
+        = _ "at" _ t:time() _ s:statement() _ { Stmt::At(t, Box::new(s)) }
+
     rule scene() -> Stmt
         = _ "scene" _ i:identifier()  _ s:statement() _ { Stmt::Scene(i, Box::new(s)) }
 
@@ -66,10 +72,27 @@ peg::parser!(pub grammar parser() for str {
     rule stop() -> Stmt
         = _ "stop" _ i:identifier() _ { Stmt::Stop(i) }
 
+    rule func() -> Stmt
+        = _ "fn" _ i:identifier() _ "(" _ p:parameters() _ ")" _ "=>"  _ b:statement() _ { Stmt::Func(i, p, Box::new(b)) }
+
+    rule parameters() -> Vec<String>
+        = _ first:identifier() _ rest:(parameter_tail())* {
+            let mut params = vec![first];
+            params.extend(rest);
+            params
+        }
+        / _ {
+            vec![]
+        }
+
+    rule parameter_tail() -> String
+        = "," _ p:identifier() _ { p }
+
     rule expression() -> Expr
         = get()
         / string()
         / duration()
+        / time()
         / i:identifier() {Expr::Ident(i)}
 
     rule get() -> Expr
@@ -80,6 +103,9 @@ peg::parser!(pub grammar parser() for str {
 
     rule duration() -> Expr
         = d:$(['0'..='9']+ ("h"/"m"/"s")) { Expr::Duration(d.to_owned()) }
+
+    rule time() -> Expr
+        = t:$((['0'..='9']+ ":" ['0'..='9']+ ("AM"/"PM"))/"sunrise"/"sunset") { Expr::Time(t.to_owned()) }
 
 
     rule path_match() -> String
