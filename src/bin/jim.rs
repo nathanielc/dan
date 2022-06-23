@@ -1,8 +1,8 @@
 use env_logger;
 use jim::{compiler::Interpreter, mqtt_engine::MQTTEngine, vm::VM, Compile, Result};
-use std::fs;
 use std::io::{self, Read};
 use std::path::PathBuf;
+use std::{fs, sync::Arc};
 use structopt::StructOpt;
 use tokio::{select, signal, sync::broadcast};
 
@@ -57,10 +57,14 @@ async fn main() -> Result<()> {
 }
 
 async fn run(src: &str, url: &str, shutdown: broadcast::Receiver<()>) -> Result<()> {
-    let mqtt = MQTTEngine::new(url).unwrap();
-    let code = Interpreter::from_source(src);
-    let vm = VM::new(mqtt);
-    vm.run(code, shutdown).await?;
+    let mqtt = MQTTEngine::new(url)?;
+    let code = Interpreter::from_source(src)?;
+    {
+        let vm = VM::new(mqtt.clone());
+        vm.run(code, shutdown).await?;
+    }
+    let mqtt = Arc::try_unwrap(mqtt).unwrap();
+    mqtt.shutdown().await?;
     Ok(())
 }
 

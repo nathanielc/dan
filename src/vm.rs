@@ -31,6 +31,10 @@ pub trait Engine: Clone + Send + Sync {
 }
 
 struct Thread<E: Engine> {
+    cancel_rx: broadcast::Receiver<()>,
+    ctx: ThreadContext<E>,
+}
+struct ThreadContext<E: Engine> {
     engine: E,
     code: Arc<Code>,
     ip: usize,
@@ -38,21 +42,21 @@ struct Thread<E: Engine> {
     stack_ptr: usize, // points to the next free space
     call_stack: Vec<usize>,
     sender: Sender<JoinHandle<Result<()>>>,
-    cancel_rx: broadcast::Receiver<()>,
     cancel_tx: broadcast::Sender<()>,
 }
 
 impl<E: Engine> fmt::Debug for Thread<E> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Point")
-            .field("ip", &self.ip)
-            .field("stack_ptr", &self.stack_ptr)
+            .field("ip", &self.ctx.ip)
+            .field("stack_ptr", &self.ctx.stack_ptr)
             .finish()
     }
 }
 
 enum StepResult {
     Continue,
+    SceneContext,
     Break,
 }
 
@@ -65,28 +69,63 @@ impl<E: Engine + 'static> Thread<E> {
     ) -> Thread<E> {
         let (cancel_tx, cancel_rx) = broadcast::channel(1);
         Thread {
-            engine,
-            code,
-            ip,
-            stack: unsafe { std::mem::zeroed() },
-            stack_ptr: 0,
-            call_stack: Vec::new(),
-            sender,
             cancel_rx,
-            cancel_tx,
+            ctx: ThreadContext {
+                engine,
+                code,
+                ip,
+                stack: unsafe { std::mem::zeroed() },
+                stack_ptr: 0,
+                call_stack: Vec::new(),
+                sender,
+                cancel_tx,
+            },
         }
     }
-    fn from_spawn(&self, ip: usize) -> Thread<E> {
+    fn run(self, shutdown: broadcast::Receiver<()>) -> BoxFuture<'static, Result<()>> {
+        // Use boxed indirection to avoid recusive async calls.
+        // See https://rust-lang.github.io/async-book/07_workarounds/04_recursion.html
+        self._run(shutdown).boxed()
+    }
+    async fn _run(mut self, mut shutdown: broadcast::Receiver<()>) -> Result<()> {
+        loop {
+            select! {
+                // TODO: Restructure so that we do not have to pre-emptively resubsribe for each
+                // step
+                step = self.ctx.step(shutdown.resubscribe()) => {
+                    match step? {
+                        StepResult::Continue => {}
+                        StepResult::SceneContext => {
+                            let (cancel_tx, cancel_rx) = broadcast::channel(1);
+                            self.cancel_rx = cancel_rx;
+                            self.ctx.cancel_tx = cancel_tx;
+                        },
+                        StepResult::Break => break,
+                    }
+                },
+                _ = shutdown.recv() => break,
+                _ = self.cancel_rx.recv() => break,
+            }
+        }
+        Ok(())
+    }
+}
+impl<E: Engine + 'static> ThreadContext<E> {
+    fn spawn(&self, ip: usize) -> Thread<E> {
+        let cancel_tx = self.cancel_tx.clone();
+        let cancel_rx = self.cancel_tx.subscribe();
         Thread {
-            engine: self.engine.clone(),
-            code: self.code.clone(),
-            ip,
-            stack: self.stack.clone(),
-            stack_ptr: self.stack_ptr,
-            call_stack: Vec::new(),
-            sender: self.sender.clone(),
-            cancel_rx: self.cancel_rx.resubscribe(),
-            cancel_tx: self.cancel_tx.clone(),
+            ctx: ThreadContext {
+                engine: self.engine.clone(),
+                code: self.code.clone(),
+                ip,
+                stack: self.stack.clone(),
+                stack_ptr: self.stack_ptr,
+                call_stack: Vec::new(),
+                sender: self.sender.clone(),
+                cancel_tx,
+            },
+            cancel_rx,
         }
     }
     pub fn pick(&mut self, depth: usize) {
@@ -104,29 +143,6 @@ impl<E: Engine + 'static> Thread<E> {
         let v = self.stack[self.stack_ptr - 1].clone();
         self.stack_ptr -= 1;
         v
-    }
-    fn run(self, shutdown: broadcast::Receiver<()>) -> BoxFuture<'static, Result<()>> {
-        // Use boxed indirection to avoid recusive async calls.
-        // See https://rust-lang.github.io/async-book/07_workarounds/04_recursion.html
-        self._run(shutdown).boxed()
-    }
-    async fn _run(mut self, mut shutdown: broadcast::Receiver<()>) -> Result<()> {
-        loop {
-            let mut cancel_rx = self.cancel_rx.resubscribe();
-            select! {
-                // TODO: Restructure so that we do not have to pre-emptively resubsribe for each
-                // step
-                step = self.step(shutdown.resubscribe()) => {
-                    match step? {
-                        StepResult::Continue => {}
-                        StepResult::Break => break,
-                    }
-                },
-                _ = shutdown.recv() => break,
-                _ = cancel_rx.recv() => break,
-            }
-        }
-        Ok(())
     }
 
     async fn step(&mut self, shutdown: broadcast::Receiver<()>) -> Result<StepResult> {
@@ -148,7 +164,7 @@ impl<E: Engine + 'static> Thread<E> {
                 self.pop();
             }
             Instruction::Spawn(ip) => {
-                let new_thread = self.from_spawn(self.ip);
+                let new_thread = self.spawn(self.ip);
                 let join_handle = tokio::spawn(new_thread.run(shutdown));
                 // Track every spawned thread, so we can join on them
                 self.sender.send(join_handle).await?;
@@ -204,12 +220,11 @@ impl<E: Engine + 'static> Thread<E> {
                 self.ip = self.call_stack.pop().unwrap();
             }
             Instruction::SceneContext => {
-                let (cancel_tx, cancel_rx) = broadcast::channel(1);
-                self.cancel_rx = cancel_rx;
-                self.cancel_tx = cancel_tx;
+                return Ok(StepResult::SceneContext);
             }
             Instruction::Stop => {
-                self.cancel_tx.send(()).unwrap();
+                let count = self.cancel_tx.send(()).unwrap();
+                log::debug!("stopped {} threads", count);
             }
             Instruction::At => {
                 let v = self.pop();
@@ -391,7 +406,8 @@ mod tests {
         }
     }
 
-    fn run_vm(code: Code) -> (Arc<TestEngine>, broadcast::Sender<()>) {
+    fn run_vm(source: &str) -> (Arc<TestEngine>, broadcast::Sender<()>) {
+        let code = Interpreter::from_source(source).unwrap();
         let te = TestEngine::new();
         let vm = VM::new(te.clone());
         let (shutdown_tx, shutdown_rx) = broadcast::channel(2);
@@ -406,10 +422,8 @@ mod tests {
         let source = "
         when path is \"on\" print \"off\"
 ";
-        let code = Interpreter::from_source(source);
-        log::debug!("code:     {:?}", code);
 
-        let (te, shutdown) = run_vm(code);
+        let (te, shutdown) = run_vm(source);
         // TODO: remove this sleep
         time::sleep(Duration::from_millis(100)).await;
 
@@ -436,10 +450,7 @@ mod tests {
         let source = "
             wait 1s print \"done\"
     ";
-        let code = Interpreter::from_source(source);
-        log::debug!("code:     {:?}", code);
-
-        let (te, shutdown) = run_vm(code);
+        let (te, shutdown) = run_vm(source);
         // TODO: remove this sleep
         time::sleep(Duration::from_millis(100)).await;
 
@@ -462,10 +473,7 @@ mod tests {
         let source = "
             set path/to/value \"on\"
     ";
-        let code = Interpreter::from_source(source);
-        log::debug!("code:     {:?}", code);
-
-        let (te, shutdown) = run_vm(code);
+        let (te, shutdown) = run_vm(source);
         // TODO: remove this sleep
         time::sleep(Duration::from_millis(100)).await;
 
@@ -489,10 +497,7 @@ mod tests {
         let source = "
             get path/to/value
     ";
-        let code = Interpreter::from_source(source);
-        log::debug!("code:     {:?}", code);
-
-        let (te, shutdown) = run_vm(code);
+        let (te, shutdown) = run_vm(source);
         // TODO: remove this sleep
         time::sleep(Duration::from_millis(100)).await;
 
@@ -520,10 +525,7 @@ mod tests {
             wait 2s print \"d\"
             wait 1s print \"e\"
     ";
-        let code = Interpreter::from_source(source);
-        log::debug!("code:     {:?}", code);
-
-        let (te, shutdown) = run_vm(code);
+        let (te, shutdown) = run_vm(source);
         // TODO: remove this sleep
         time::sleep(Duration::from_millis(100)).await;
 
@@ -554,10 +556,7 @@ mod tests {
         start night
         stop night
     ";
-        let code = Interpreter::from_source(source);
-        log::debug!("code:     {:?}", code);
-
-        let (te, shutdown) = run_vm(code);
+        let (te, shutdown) = run_vm(source);
         // TODO: remove this sleep
         time::sleep(Duration::from_millis(100)).await;
 

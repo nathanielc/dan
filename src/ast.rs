@@ -14,6 +14,7 @@ pub enum Stmt {
     Set(String, Expr),
     Let(String, Expr),
     When(String, Expr, Box<Stmt>),
+    Once(String, Expr, Box<Stmt>),
     Wait(Expr, Box<Stmt>),
     At(Expr, Box<Stmt>),
     Expr(Expr),

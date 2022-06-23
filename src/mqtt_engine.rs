@@ -1,10 +1,10 @@
 use anyhow::Result;
 use async_trait::async_trait;
-use futures::FutureExt;
 use std::sync::Arc;
 use tokio::{
     select,
     sync::{mpsc, oneshot},
+    task::JoinHandle,
 };
 
 use crate::vm::Engine;
@@ -14,6 +14,7 @@ use mqtt_async_client::client::{Client, Publish, QoS, ReadResult, Subscribe, Sub
 #[derive(Debug)]
 pub struct MQTTEngine {
     requests_tx: mpsc::Sender<Request>,
+    join_handle: JoinHandle<Result<()>>,
 }
 
 #[derive(Debug)]
@@ -40,20 +41,19 @@ impl MQTTEngine {
         let cli = Client::builder().set_url_string(url)?.build()?;
 
         let (requests_tx, requests_rx) = mpsc::channel(100);
-        tokio::spawn(async move {
-            Self::run(cli, requests_rx).await.unwrap();
-        });
-        Ok(Arc::new(Self { requests_tx }))
+        let join_handle = tokio::spawn(async move { Self::run(cli, requests_rx).await });
+        Ok(Arc::new(Self {
+            requests_tx,
+            join_handle,
+        }))
     }
     async fn run(mut cli: Client, mut requests_rx: mpsc::Receiver<Request>) -> Result<()> {
         cli.connect().await?;
         let mut watches: Vec<Watch> = Vec::new();
         loop {
-            let req_fut = Box::pin(requests_rx.recv().fuse());
-            let data_fut = Box::pin(async { cli.read_subscriptions().await }.fuse());
             let s = select! {
-                req = req_fut =>  SelectResult::Request(req),
-                data = data_fut =>  SelectResult::Data(data.unwrap()),
+                req = requests_rx.recv() =>  SelectResult::Request(req),
+                data = cli.read_subscriptions() =>  SelectResult::Data(data?),
             };
             match s {
                 SelectResult::Request(req) => match req {
@@ -81,7 +81,15 @@ impl MQTTEngine {
                 }
             }
         }
-        Ok(cli.disconnect().await?)
+        let r = cli.disconnect().await;
+        Ok(r?)
+    }
+    pub async fn shutdown(self) -> Result<()> {
+        // Explicitly drop request_tx so that the run loop
+        // knows its done
+        drop(self.requests_tx);
+        self.join_handle.await??;
+        Ok(())
     }
 }
 
