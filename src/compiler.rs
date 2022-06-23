@@ -223,6 +223,30 @@ impl Interpreter {
                     self.add_instruction(Instruction::Pop);
                 }
             }
+            Stmt::Once(path, expr, stmt) => {
+                let spawn_ip = self.add_instruction(Instruction::Spawn(usize::MAX));
+                // Add path
+                let const_index = self.add_constant(Value::Path(path));
+                self.add_instruction(Instruction::Constant(const_index));
+                // Add expr
+                self.interpret_expr(env, expr);
+                // Watch, creates a promise
+                self.add_instruction(Instruction::When);
+                // Add stmt
+                self.interpret_stmt(env, *stmt);
+                // Loop the spawned thread back to the beginning
+                self.add_instruction(Instruction::Term);
+
+                // backpatch the spawn jump pointer
+                let l = self.code.instructions.len();
+                if let Some(Instruction::Spawn(ip)) =
+                    self.code.instructions.get_mut(spawn_ip as usize)
+                {
+                    *ip = l;
+                } else {
+                    panic!("missing spawn instruction")
+                }
+            }
             Stmt::When(path, expr, stmt) => {
                 let spawn_ip = self.add_instruction(Instruction::Spawn(usize::MAX));
                 // Add path
@@ -587,6 +611,34 @@ print x
                     Instruction::Constant(2),
                     Instruction::Print,
                     Instruction::Jump(1),
+                    Instruction::Term,
+                ],
+                constants: vec![
+                    Value::Path("path".to_string()),
+                    Value::Str("off".to_string()),
+                    Value::Str("off".to_string())
+                ],
+            },
+            code
+        );
+    }
+    #[test]
+    fn test_once() {
+        let source = "
+        once path is \"off\" print \"off\"
+";
+        let code = Interpreter::from_source(source);
+        log::debug!("code:     {:?}", code);
+        assert_eq!(
+            Code {
+                instructions: vec![
+                    Instruction::Spawn(7),
+                    Instruction::Constant(0),
+                    Instruction::Constant(1),
+                    Instruction::When,
+                    Instruction::Constant(2),
+                    Instruction::Print,
+                    Instruction::Term,
                     Instruction::Term,
                 ],
                 constants: vec![

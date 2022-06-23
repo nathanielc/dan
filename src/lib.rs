@@ -11,9 +11,9 @@ pub trait Compile {
 
     fn from_ast(ast: ast::Stmt) -> Self::Output;
 
-    fn from_source(source: &str) -> Self::Output {
-        let ast: ast::Stmt = parser::file(source).unwrap();
-        Self::from_ast(ast)
+    fn from_source(source: &str) -> Result<Self::Output> {
+        let ast: ast::Stmt = parser::file(source)?;
+        Ok(Self::from_ast(ast))
     }
 }
 
@@ -28,6 +28,7 @@ peg::parser!(pub grammar parser() for str {
         / print()
         / let()
         / when()
+        / once()
         / wait()
         / at()
         / scene()
@@ -54,6 +55,13 @@ peg::parser!(pub grammar parser() for str {
             _ "is" _
             e:expression()
             s:statement() _ { Stmt::When(pm, e,  Box::new(s)) }
+
+    rule once() -> Stmt
+        =  _ "once" _
+            pm:path_match()
+            _ "is" _
+            e:expression()
+            s:statement() _ { Stmt::Once(pm, e,  Box::new(s)) }
 
     rule wait() -> Stmt
         =  _ "wait" _
@@ -99,7 +107,7 @@ peg::parser!(pub grammar parser() for str {
         =  _ "get" _ p:path() _  { Expr::Get(p) }
 
     rule string() -> Expr
-        = "\"" v:$(['0'..='9'| 'a'..='z' | 'A'..='Z' | '_' ]+) "\"" { Expr::String(v.to_owned()) }
+        = "\"" v:$([^ '"']+) "\"" { Expr::String(v.to_owned()) }
 
     rule duration() -> Expr
         = d:$(['0'..='9']+ ("h"/"m"/"s")) { Expr::Duration(d.to_owned()) }
