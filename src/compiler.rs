@@ -1,20 +1,24 @@
 use crate::ast::{Expr, Stmt};
 use crate::Compile;
 use anyhow::anyhow;
+use serde::Serialize;
 use std::{
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
     convert::{TryFrom, TryInto},
     fmt::Display,
     time::Duration,
 };
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(untagged)]
 pub enum Value {
     Str(String),
     Path(String),
     Duration(Duration),
     Time(TimeOfDay),
-    Number(f64),
+    Float(f64),
+    Integer(i64),
+    Object(BTreeMap<String, Value>),
     Jump(usize),
 }
 
@@ -25,8 +29,19 @@ impl Display for Value {
             Value::Path(s) => f.write_str(s.as_str()),
             Value::Duration(d) => write!(f, "{:?}", d),
             Value::Time(t) => write!(f, "{}", t),
-            Value::Number(n) => write!(f, "{}", n),
+            Value::Float(fl) => write!(f, "{}", fl),
+            Value::Integer(i) => write!(f, "{}", i),
             Value::Jump(ip) => write!(f, "jmp: {:?}", ip),
+            Value::Object(props) => {
+                write!(f, "{{")?;
+                for (i, (k, v)) in props.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}: {}", k, v)?;
+                }
+                write!(f, "}}")
+            }
         }
     }
 }
@@ -51,8 +66,13 @@ impl TryFrom<Value> for Vec<u8> {
             Value::Path(s) => Ok(s.as_bytes().to_vec()),
             Value::Duration(_) => todo!(),
             Value::Time(_) => todo!(),
-            Value::Number(n) => Ok(n.to_string().as_bytes().to_vec()),
+            Value::Float(f) => Ok(f.to_string().as_bytes().to_vec()),
+            Value::Integer(i) => Ok(i.to_string().as_bytes().to_vec()),
             Value::Jump(_) => todo!(),
+            Value::Object(props) => {
+                let json = serde_json::to_vec(&props)?;
+                Ok(json)
+            }
         }
     }
 }
@@ -103,13 +123,21 @@ impl TryFrom<Expr> for Value {
                     Ok(Value::Time(TimeOfDay::HM(hours + h, m)))
                 }
             },
-            Expr::Number(n) => Ok(Value::Number(n)),
+            Expr::Float(n) => Ok(Value::Float(n)),
+            Expr::Integer(n) => Ok(Value::Integer(n)),
+            Expr::Object(props) => {
+                let mut properties = BTreeMap::new();
+                for (key, expr) in props {
+                    properties.insert(key, expr.try_into()?);
+                }
+                Ok(Value::Object(properties))
+            }
             _ => Err(anyhow!("expression is not a literal value")),
         }
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub enum TimeOfDay {
     Sunrise,
     Sunset,
@@ -400,7 +428,12 @@ impl Interpreter {
                 }
                 self.add_instruction(Instruction::Pick(depth - 1));
             }
-            Expr::String(_) | Expr::Duration(_) | Expr::Time(_) | Expr::Number(_) => {
+            Expr::String(_)
+            | Expr::Duration(_)
+            | Expr::Time(_)
+            | Expr::Float(_)
+            | Expr::Integer(_)
+            | Expr::Object(_) => {
                 let const_index = self.add_constant(expr.try_into().unwrap());
                 self.add_instruction(Instruction::Constant(const_index));
             }
@@ -782,7 +815,7 @@ print x
                     Instruction::Print,
                     Instruction::Term,
                 ],
-                constants: vec![Value::Number(7.0),],
+                constants: vec![Value::Float(7.0),],
             },
             code
         );

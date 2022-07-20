@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 /// The AST node for expressions.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
@@ -5,7 +7,9 @@ pub enum Expr {
     String(String),
     Duration(String),
     Time(String),
-    Number(f64),
+    Float(f64),
+    Integer(i64),
+    Object(BTreeMap<String, Expr>),
 }
 
 #[derive(Debug, PartialEq)]
