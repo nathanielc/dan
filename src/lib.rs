@@ -18,6 +18,7 @@ pub trait Compile {
 }
 
 use crate::ast::*;
+use std::collections::BTreeMap;
 peg::parser!(pub grammar parser() for str {
     pub rule file() -> Stmt
         = _ b:statement()* _ { Stmt::Block(b) }
@@ -101,7 +102,9 @@ peg::parser!(pub grammar parser() for str {
         / duration()
         / time()
         / i:identifier() {Expr::Ident(i)}
-        / number()
+        / float()
+        / integer()
+        / object()
 
     rule string() -> Expr
         = "\"" v:$([^ '"']+) "\"" { Expr::String(v.to_owned()) }
@@ -114,19 +117,37 @@ peg::parser!(pub grammar parser() for str {
 
 
     rule path_match() -> String
-        = pm:$(
-            "$" /
-            ((("+" / identifier()) "/")* ("+" / "#" / identifier()))
-        ) { pm.to_owned() }
+        = pm:$([^ ' ']+) { pm.to_owned() }
 
-    rule path() -> String
-        = p:$(
-            "$" /
-            (( identifier() "/")* (identifier()))
-        ) { p.to_owned() }
+    rule float() -> Expr
+        = t:$(['0'..='9']+ "." ['0'..='9']+) { Expr::Float(t.parse().unwrap()) }
 
-    rule number() -> Expr
-        = t:$(['0'..='9']+ ("." ['0'..='9']+)?) { Expr::Number(t.parse().unwrap()) }
+    rule integer() -> Expr
+        = t:$(['0'..='9']+) { Expr::Integer(t.parse().unwrap()) }
+
+    rule object() -> Expr
+        = "{" _ p:obj_properties() _ "}"  {
+            let mut properties = BTreeMap::new();
+            for (key, expr) in p {
+                properties.insert(key, expr);
+            }
+            Expr::Object(properties)
+        }
+
+    rule obj_properties() -> Vec<(String, Expr)>
+        = _ first:obj_property() _ rest:(obj_property_tail())* {
+            let mut params = vec![first];
+            params.extend(rest);
+            params
+        }
+        / _ {
+            vec![]
+        }
+
+    rule obj_property() -> (String, Expr)
+        = p:identifier() _ ":" _ e:expression() { (p,e) }
+    rule obj_property_tail() -> (String, Expr)
+        = "," _ property:obj_property() { property }
 
 
     rule identifier() -> String
