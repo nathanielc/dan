@@ -26,7 +26,7 @@ enum Request {
 #[derive(Debug)]
 struct Watch {
     path: String,
-    value: String,
+    value: Vec<u8>,
     tx: oneshot::Sender<()>,
 }
 
@@ -69,9 +69,7 @@ impl MQTTEngine {
                 SelectResult::Data(data) => {
                     let mut i = 0 as usize;
                     while i < watches.len() {
-                        if data.topic() == watches[i].path
-                            && data.payload() == watches[i].value.as_bytes()
-                        {
+                        if data.topic() == watches[i].path && data.payload() == watches[i].value {
                             let w = watches.remove(i);
                             w.tx.send(()).unwrap();
                             continue;
@@ -95,7 +93,7 @@ impl MQTTEngine {
 
 #[async_trait]
 impl Engine for Arc<MQTTEngine> {
-    async fn when(&self, path: &str, value: &str) -> Result<()> {
+    async fn when(&self, path: &str, value: Vec<u8>) -> Result<()> {
         let s = Subscribe::new(vec![SubscribeTopic {
             topic_path: path.to_string(),
             qos: QoS::AtLeastOnce,
@@ -106,15 +104,15 @@ impl Engine for Arc<MQTTEngine> {
         self.requests_tx
             .send(Request::Watch(Watch {
                 path: path.to_string(),
-                value: value.to_string(),
+                value,
                 tx,
             }))
             .await?;
         Ok(rx.await?)
     }
 
-    async fn set(&self, path: &str, value: &str) -> Result<()> {
-        let msg = Publish::new(path.to_string(), value.as_bytes().to_vec());
+    async fn set(&self, path: &str, value: Vec<u8>) -> Result<()> {
+        let msg = Publish::new(path.to_string(), value);
         self.requests_tx.send(Request::Publish(msg)).await?;
         Ok(())
     }

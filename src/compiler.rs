@@ -14,6 +14,7 @@ pub enum Value {
     Path(String),
     Duration(Duration),
     Time(TimeOfDay),
+    Number(f64),
     Jump(usize),
 }
 
@@ -24,6 +25,7 @@ impl Display for Value {
             Value::Path(s) => f.write_str(s.as_str()),
             Value::Duration(d) => write!(f, "{:?}", d),
             Value::Time(t) => write!(f, "{}", t),
+            Value::Number(n) => write!(f, "{}", n),
             Value::Jump(ip) => write!(f, "jmp: {:?}", ip),
         }
     }
@@ -37,6 +39,20 @@ impl TryFrom<Value> for String {
             Value::Str(s) => Ok(s),
             Value::Path(s) => Ok(s),
             _ => Err(anyhow!("value is not a string")),
+        }
+    }
+}
+impl TryFrom<Value> for Vec<u8> {
+    type Error = anyhow::Error;
+
+    fn try_from(value: Value) -> std::result::Result<Self, Self::Error> {
+        match value {
+            Value::Str(s) => Ok(s.as_bytes().to_vec()),
+            Value::Path(s) => Ok(s.as_bytes().to_vec()),
+            Value::Duration(_) => todo!(),
+            Value::Time(_) => todo!(),
+            Value::Number(n) => Ok(n.to_string().as_bytes().to_vec()),
+            Value::Jump(_) => todo!(),
         }
     }
 }
@@ -87,6 +103,7 @@ impl TryFrom<Expr> for Value {
                     Ok(Value::Time(TimeOfDay::HM(hours + h, m)))
                 }
             },
+            Expr::Number(n) => Ok(Value::Number(n)),
             _ => Err(anyhow!("expression is not a literal value")),
         }
     }
@@ -383,7 +400,7 @@ impl Interpreter {
                 }
                 self.add_instruction(Instruction::Pick(depth - 1));
             }
-            Expr::String(_) | Expr::Duration(_) | Expr::Time(_) => {
+            Expr::String(_) | Expr::Duration(_) | Expr::Time(_) | Expr::Number(_) => {
                 let const_index = self.add_constant(expr.try_into().unwrap());
                 self.add_instruction(Instruction::Constant(const_index));
             }
@@ -747,6 +764,25 @@ print x
                     Value::Time(TimeOfDay::HM(12, 50)),
                     Value::Str("x".to_string()),
                 ],
+            },
+            code
+        );
+    }
+    #[test]
+    fn test_number() {
+        let source = "
+        print 7
+";
+        let code = Interpreter::from_source(source).unwrap();
+        log::debug!("code:     {:?}", code);
+        assert_eq!(
+            Code {
+                instructions: vec![
+                    Instruction::Constant(0),
+                    Instruction::Print,
+                    Instruction::Term,
+                ],
+                constants: vec![Value::Number(7.0),],
             },
             code
         );

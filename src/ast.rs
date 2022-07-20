@@ -5,6 +5,7 @@ pub enum Expr {
     String(String),
     Duration(String),
     Time(String),
+    Number(f64),
 }
 
 #[derive(Debug, PartialEq)]
