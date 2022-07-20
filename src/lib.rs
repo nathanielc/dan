@@ -97,14 +97,10 @@ peg::parser!(pub grammar parser() for str {
         = "," _ p:identifier() _ { p }
 
     rule expression() -> Expr
-        = get()
-        / string()
+        = string()
         / duration()
         / time()
         / i:identifier() {Expr::Ident(i)}
-
-    rule get() -> Expr
-        =  _ "get" _ p:path() _  { Expr::Get(p) }
 
     rule string() -> Expr
         = "\"" v:$([^ '"']+) "\"" { Expr::String(v.to_owned()) }

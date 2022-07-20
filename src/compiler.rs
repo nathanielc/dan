@@ -124,7 +124,6 @@ pub enum Instruction {
     Wait,
     At,
     Set,
-    Get,
     Stop,
     SceneContext,
 }
@@ -384,13 +383,6 @@ impl Interpreter {
                 }
                 self.add_instruction(Instruction::Pick(depth - 1));
             }
-            Expr::Get(path) => {
-                // Add path
-                let const_index = self.add_constant(Value::Path(path));
-                self.add_instruction(Instruction::Constant(const_index));
-                // Watch, creates a promise
-                self.add_instruction(Instruction::Get);
-            }
             Expr::String(_) | Expr::Duration(_) | Expr::Time(_) => {
                 let const_index = self.add_constant(expr.try_into().unwrap());
                 self.add_instruction(Instruction::Constant(const_index));
@@ -406,7 +398,7 @@ mod tests {
     #[test]
     fn test_hello_world() {
         let source = "print \"hello_world\"";
-        let code = Interpreter::from_source(source);
+        let code = Interpreter::from_source(source).unwrap();
         log::debug!("bytecode:     {:?}", code);
         assert_eq!(
             Code {
@@ -432,7 +424,7 @@ print x
 print y
 print z
 ";
-        let code = Interpreter::from_source(source);
+        let code = Interpreter::from_source(source).unwrap();
         log::debug!("bytecode:     {:?}", code);
         assert_eq!(
             Code {
@@ -478,7 +470,7 @@ let x = \"x\"
     print z
 }
 ";
-        let code = Interpreter::from_source(source);
+        let code = Interpreter::from_source(source).unwrap();
         log::debug!("bytecode:     {:?}", code);
         assert_eq!(
             Code {
@@ -524,7 +516,7 @@ let x = \"x\"
 }
 print x
 ";
-        let code = Interpreter::from_source(source);
+        let code = Interpreter::from_source(source).unwrap();
         log::debug!("code:     {:?}", code);
         assert_eq!(
             Code {
@@ -566,7 +558,7 @@ let x = \"x\"
 }
 print x
 ";
-        let code = Interpreter::from_source(source);
+        let code = Interpreter::from_source(source).unwrap();
         log::debug!("code:     {:?}", code);
         assert_eq!(
             Code {
@@ -599,7 +591,7 @@ print x
         let source = "
         when path is \"off\" print \"off\"
 ";
-        let code = Interpreter::from_source(source);
+        let code = Interpreter::from_source(source).unwrap();
         log::debug!("code:     {:?}", code);
         assert_eq!(
             Code {
@@ -627,7 +619,7 @@ print x
         let source = "
         once path is \"off\" print \"off\"
 ";
-        let code = Interpreter::from_source(source);
+        let code = Interpreter::from_source(source).unwrap();
         log::debug!("code:     {:?}", code);
         assert_eq!(
             Code {
@@ -655,7 +647,7 @@ print x
         let source = "
         wait 1s print \"done\"
 ";
-        let code = Interpreter::from_source(source);
+        let code = Interpreter::from_source(source).unwrap();
         log::debug!("code:     {:?}", code);
         assert_eq!(
             Code {
@@ -681,7 +673,7 @@ print x
         let source = "
         set path/to/value \"on\"
 ";
-        let code = Interpreter::from_source(source);
+        let code = Interpreter::from_source(source).unwrap();
         log::debug!("code:     {:?}", code);
         assert_eq!(
             Code {
@@ -700,33 +692,13 @@ print x
         );
     }
     #[test]
-    fn test_get() {
-        let source = "
-        get path/to/value
-";
-        let code = Interpreter::from_source(source);
-        log::debug!("code:     {:?}", code);
-        assert_eq!(
-            Code {
-                instructions: vec![
-                    Instruction::Constant(0),
-                    Instruction::Get,
-                    Instruction::Pop,
-                    Instruction::Term
-                ],
-                constants: vec![Value::Path("path/to/value".to_string()),],
-            },
-            code
-        );
-    }
-    #[test]
     fn test_scene() {
         let source = "
         scene night print \"x\"
         start night
         stop night
 ";
-        let code = Interpreter::from_source(source);
+        let code = Interpreter::from_source(source).unwrap();
         log::debug!("code:     {:?}", code);
         assert_eq!(
             Code {
@@ -758,91 +730,7 @@ print x
         let source = "
         at 12:50PM print \"x\"
 ";
-        let code = Interpreter::from_source(source);
-        log::debug!("code:     {:?}", code);
-        assert_eq!(
-            Code {
-                instructions: vec![
-                    Instruction::Spawn(6),
-                    Instruction::Constant(0),
-                    Instruction::At,
-                    Instruction::Constant(1),
-                    Instruction::Print,
-                    Instruction::Jump(1),
-                    Instruction::Term,
-                ],
-                constants: vec![
-                    Value::Time(TimeOfDay::HM(12, 50)),
-                    Value::Str("x".to_string()),
-                ],
-            },
-            code
-        );
-    }
-    #[test]
-    fn test_func_no_args() {
-        let source = "
-        fn foo () => {
-            \"a\"
-        }
-";
-        let code = Interpreter::from_source(source);
-        log::debug!("code:     {:?}", code);
-        assert_eq!(
-            Code {
-                instructions: vec![
-                    Instruction::Spawn(6),
-                    Instruction::Constant(0),
-                    Instruction::At,
-                    Instruction::Constant(1),
-                    Instruction::Print,
-                    Instruction::Jump(1),
-                    Instruction::Term,
-                ],
-                constants: vec![
-                    Value::Time(TimeOfDay::HM(12, 50)),
-                    Value::Str("x".to_string()),
-                ],
-            },
-            code
-        );
-    }
-    #[test]
-    fn test_func_one_arg() {
-        let source = "
-        fn foo (a) => {
-            \"a\"
-        }
-";
-        let code = Interpreter::from_source(source);
-        log::debug!("code:     {:?}", code);
-        assert_eq!(
-            Code {
-                instructions: vec![
-                    Instruction::Spawn(6),
-                    Instruction::Constant(0),
-                    Instruction::At,
-                    Instruction::Constant(1),
-                    Instruction::Print,
-                    Instruction::Jump(1),
-                    Instruction::Term,
-                ],
-                constants: vec![
-                    Value::Time(TimeOfDay::HM(12, 50)),
-                    Value::Str("x".to_string()),
-                ],
-            },
-            code
-        );
-    }
-    #[test]
-    fn test_func_args() {
-        let source = "
-        fn foo (a,b,c) => {
-            \"a\"
-        }
-";
-        let code = Interpreter::from_source(source);
+        let code = Interpreter::from_source(source).unwrap();
         log::debug!("code:     {:?}", code);
         assert_eq!(
             Code {

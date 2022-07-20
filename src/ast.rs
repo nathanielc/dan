@@ -2,7 +2,6 @@
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     Ident(String),
-    Get(String),
     String(String),
     Duration(String),
     Time(String),
