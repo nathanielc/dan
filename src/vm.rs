@@ -25,8 +25,8 @@ pub trait Engine: Clone + Send + Sync {
         time::sleep(d).await;
         Ok(())
     }
-    async fn when(&self, path: &str, value: &str) -> Result<()>;
-    async fn set(&self, path: &str, value: &str) -> Result<()>;
+    async fn when(&self, path: &str, value: Vec<u8>) -> Result<()>;
+    async fn set(&self, path: &str, value: Vec<u8>) -> Result<()>;
 }
 
 struct Thread<E: Engine> {
@@ -180,16 +180,16 @@ impl<E: Engine + 'static> ThreadContext<E> {
                 return Ok(StepResult::Break);
             }
             Instruction::When => {
-                let value: String = self.pop().try_into()?;
+                let value: Vec<u8> = self.pop().try_into()?;
                 let path: String = self.pop().try_into()?;
                 // Creature future and queue it for the executor
-                self.engine.when(path.as_str(), value.as_str()).await?;
+                self.engine.when(path.as_str(), value).await?;
             }
             Instruction::Set => {
-                let value: String = self.pop().try_into()?;
+                let value: Vec<u8> = self.pop().try_into()?;
                 let path: String = self.pop().try_into()?;
                 // Creature future and queue it for the executor
-                self.engine.set(path.as_str(), value.as_str()).await?;
+                self.engine.set(path.as_str(), value).await?;
             }
             Instruction::Wait => {
                 let v = self.pop();
@@ -334,12 +334,12 @@ mod tests {
             future::ready(Ok(())).await
         }
 
-        async fn when(&self, path: &str, value: &str) -> Result<()> {
+        async fn when(&self, path: &str, value: Vec<u8>) -> Result<()> {
             let count = self.when_count.fetch_add(1, Ordering::SeqCst);
             self.when_args
                 .lock()
                 .unwrap()
-                .push((path.to_string(), value.to_string()));
+                .push((path.to_string(), String::from_utf8(value.into()).unwrap()));
             println!("count {}", count);
             if count == 0 {
                 future::ready(Ok(())).await
@@ -348,12 +348,12 @@ mod tests {
             }
         }
 
-        async fn set(&self, path: &str, value: &str) -> Result<()> {
+        async fn set(&self, path: &str, value: Vec<u8>) -> Result<()> {
             self.set_count.fetch_add(1, Ordering::SeqCst);
             self.set_args
                 .lock()
                 .unwrap()
-                .push((path.to_string(), value.to_string()));
+                .push((path.to_string(), String::from_utf8(value.into()).unwrap()));
             future::ready(Ok(())).await
         }
     }

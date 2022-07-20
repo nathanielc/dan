@@ -101,6 +101,7 @@ peg::parser!(pub grammar parser() for str {
         / duration()
         / time()
         / i:identifier() {Expr::Ident(i)}
+        / number()
 
     rule string() -> Expr
         = "\"" v:$([^ '"']+) "\"" { Expr::String(v.to_owned()) }
@@ -123,6 +124,9 @@ peg::parser!(pub grammar parser() for str {
             "$" /
             (( identifier() "/")* (identifier()))
         ) { p.to_owned() }
+
+    rule number() -> Expr
+        = t:$(['0'..='9']+ ("." ['0'..='9']+)?) { Expr::Number(t.parse().unwrap()) }
 
 
     rule identifier() -> String
