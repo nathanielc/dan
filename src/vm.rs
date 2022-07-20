@@ -27,7 +27,6 @@ pub trait Engine: Clone + Send + Sync {
     }
     async fn when(&self, path: &str, value: &str) -> Result<()>;
     async fn set(&self, path: &str, value: &str) -> Result<()>;
-    async fn get(&self, path: &str) -> Result<String>;
 }
 
 struct Thread<E: Engine> {
@@ -192,12 +191,6 @@ impl<E: Engine + 'static> ThreadContext<E> {
                 // Creature future and queue it for the executor
                 self.engine.set(path.as_str(), value.as_str()).await?;
             }
-            Instruction::Get => {
-                let path: String = self.pop().try_into()?;
-                // Creature future and queue it for the executor
-                let result = self.engine.get(path.as_str()).await?;
-                self.push(Value::Str(result));
-            }
             Instruction::Wait => {
                 let v = self.pop();
                 match v {
@@ -319,8 +312,6 @@ mod tests {
         when_args: Mutex<Vec<(String, String)>>,
         set_count: AtomicUsize,
         set_args: Mutex<Vec<(String, String)>>,
-        get_count: AtomicUsize,
-        get_args: Mutex<Vec<String>>,
     }
     impl TestEngine {
         fn new() -> Arc<Self> {
@@ -331,8 +322,6 @@ mod tests {
                 when_args: Mutex::new(Vec::new()),
                 set_count: AtomicUsize::new(0),
                 set_args: Mutex::new(Vec::new()),
-                get_count: AtomicUsize::new(0),
-                get_args: Mutex::new(Vec::new()),
             })
         }
     }
@@ -366,12 +355,6 @@ mod tests {
                 .unwrap()
                 .push((path.to_string(), value.to_string()));
             future::ready(Ok(())).await
-        }
-
-        async fn get(&self, path: &str) -> Result<String> {
-            self.get_count.fetch_add(1, Ordering::SeqCst);
-            self.get_args.lock().unwrap().push(path.to_string());
-            future::ready(Ok("get value".to_string())).await
         }
     }
 
@@ -429,7 +412,6 @@ mod tests {
 
         assert_eq!(0, te.wait_count.load(Ordering::SeqCst));
         assert_eq!(0, te.set_count.load(Ordering::SeqCst));
-        assert_eq!(0, te.get_count.load(Ordering::SeqCst));
 
         assert_eq!(2, te.when_count.load(Ordering::SeqCst));
         assert_eq!(
@@ -456,7 +438,6 @@ mod tests {
 
         assert_eq!(0, te.when_count.load(Ordering::SeqCst));
         assert_eq!(0, te.set_count.load(Ordering::SeqCst));
-        assert_eq!(0, te.get_count.load(Ordering::SeqCst));
         assert_eq!(1, te.wait_count.load(Ordering::SeqCst));
         assert_eq!(
             vec![Duration::from_secs(1),],
@@ -478,7 +459,6 @@ mod tests {
         time::sleep(Duration::from_millis(100)).await;
 
         assert_eq!(0, te.when_count.load(Ordering::SeqCst));
-        assert_eq!(0, te.get_count.load(Ordering::SeqCst));
         assert_eq!(0, te.wait_count.load(Ordering::SeqCst));
 
         assert_eq!(1, te.set_count.load(Ordering::SeqCst));
@@ -489,30 +469,6 @@ mod tests {
                 .unwrap()
                 .drain(..)
                 .collect::<Vec<(String, String)>>(),
-        );
-        let _ = shutdown.send(());
-    }
-    #[tokio::test]
-    async fn test_get() {
-        let source = "
-            get path/to/value
-    ";
-        let (te, shutdown) = run_vm(source);
-        // TODO: remove this sleep
-        time::sleep(Duration::from_millis(100)).await;
-
-        assert_eq!(0, te.when_count.load(Ordering::SeqCst));
-        assert_eq!(0, te.wait_count.load(Ordering::SeqCst));
-        assert_eq!(0, te.set_count.load(Ordering::SeqCst));
-
-        assert_eq!(1, te.get_count.load(Ordering::SeqCst));
-        assert_eq!(
-            vec!["path/to/value".to_string()],
-            te.get_args
-                .lock()
-                .unwrap()
-                .drain(..)
-                .collect::<Vec<String>>(),
         );
         let _ = shutdown.send(());
     }
@@ -531,7 +487,6 @@ mod tests {
 
         assert_eq!(0, te.when_count.load(Ordering::SeqCst));
         assert_eq!(0, te.set_count.load(Ordering::SeqCst));
-        assert_eq!(0, te.get_count.load(Ordering::SeqCst));
         assert_eq!(5, te.wait_count.load(Ordering::SeqCst));
         assert_eq!(
             vec![
@@ -562,7 +517,6 @@ mod tests {
 
         assert_eq!(0, te.when_count.load(Ordering::SeqCst));
         assert_eq!(0, te.set_count.load(Ordering::SeqCst));
-        assert_eq!(0, te.get_count.load(Ordering::SeqCst));
         assert_eq!(0, te.wait_count.load(Ordering::SeqCst));
         let _ = shutdown.send(());
     }

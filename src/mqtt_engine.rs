@@ -118,8 +118,4 @@ impl Engine for Arc<MQTTEngine> {
         self.requests_tx.send(Request::Publish(msg)).await?;
         Ok(())
     }
-
-    async fn get(&self, _path: &str) -> Result<String> {
-        todo!()
-    }
 }
