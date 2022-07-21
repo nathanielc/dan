@@ -10,7 +10,6 @@ use tokio::{select, signal, sync::broadcast};
 #[structopt(name = "example", about = "An example of StructOpt usage.")]
 struct Opt {
     /// URL to MQTT broker
-    // short and long flags (-d, --debug) will be deduced from the field's name
     #[structopt(short, long, default_value = "mqtt://localhost")]
     mqtt_url: String,
 
