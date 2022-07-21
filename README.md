@@ -4,7 +4,8 @@
 
 Jim is a home automation assistant.
 
-Jim comes with a simple DSL for connecting to devices via the [mqtt-smarthome](https://github.com/mqtt-smarthome) architecture.
+Jim comes with a simple DSL for connecting to devices via MQTT.
+The language suppors working with the [mqtt-smarthome](https://github.com/mqtt-smarthome) architecture.
 
 ## DSL Example
 
@@ -42,5 +43,4 @@ at 9:00AM {
 
 This project contains two commands that can be run:
 
-* jim - An interactive REPL command for running DSL commands interactively.
-* jimd - A server daemon that will run scripts from a configured directory.
+* jim - An command for running a Jim script file.
