@@ -1,0 +1,6 @@
+
+# Opt in to tokio unstable features
+[build]
+rustflags = ["--cfg", "tokio_unstable"]
+
+

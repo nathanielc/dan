@@ -217,7 +217,7 @@ impl<E: Engine + 'static> ThreadContext<E> {
             }
             Instruction::Stop => {
                 let count = self.cancel_tx.send(()).unwrap();
-                log::debug!("stopped {} threads", count);
+                log::debug!("stopped {} scene threads", count);
             }
             Instruction::At => {
                 let v = self.pop();
@@ -258,20 +258,16 @@ impl<E: Engine + 'static> VM<E> {
         // Create channel for thread join handles
         let (thread_join_send, mut thread_join_recv) = mpsc::channel(100);
 
-        // Create and spawn main thread
+        // Create and run main thread
         let thread = Thread::new(self.engine.clone(), Arc::new(code), 0, thread_join_send);
-        let mut main = Some(tokio::spawn(thread.run(shutdown.resubscribe())));
+        thread.run(shutdown.resubscribe()).await?;
 
-        // Wait until all threads are completed before returning
+        // Now that the main thread is completed wait until all other threads
+        // are completed before returning.
+        //
+        // NOTE: The thread_join_send, will be dropped once all active threads are
+        // completed and this loop will terminate.
         loop {
-            if let Some(handle) = main {
-                select! {
-                _ = handle => {
-                    main = None;
-                },
-                //_ = shutdown.recv() => break,
-                };
-            }
             select! {
                 thread_join = thread_join_recv.recv() => {
                     if let Some(thread_join) = thread_join {
@@ -280,10 +276,11 @@ impl<E: Engine + 'static> VM<E> {
                         _ = shutdown.recv() => break,
                         };
                     } else {
+                        // All threads have completed
                         break;
                     }
                 }
-                    _ = shutdown.recv() => break,
+                _ = shutdown.recv() => break,
             }
         }
         Ok(())

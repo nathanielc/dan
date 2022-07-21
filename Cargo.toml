@@ -2,13 +2,14 @@
 name = "jim"
 version = "0.1.0"
 authors = ["Nathaniel Cook <nvcook42@gmail.com>"]
-edition = "2018"
+edition = "2021"
 
 [lib]
 path = "src/lib.rs"
 
 [[bin]]
 name = "jim"
+
 
 [dependencies]
 peg = "0.8"
