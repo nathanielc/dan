@@ -3,6 +3,12 @@ name = "dan"
 version = "0.1.0"
 authors = ["Nathaniel Cook <nvcook42@gmail.com>"]
 edition = "2021"
+license-file = "LICENSE"
+description = "Dan is a home automation programming langauge"
+homepage = "https://github.com/nathanielc/dan"
+repository = "https://github.com/nathanielc/dan"
+readme = "README.md"
+
 
 [lib]
 path = "src/lib.rs"
