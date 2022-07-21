@@ -27,6 +27,7 @@ serde = { version = "1.0", features = ["derive"] }
 [dependencies.mqtt-async-client]
 version = "0.3"
 default-features = false
-path = "../mqtt-async-client-rs"
 [dependencies.async-std]
 version = "1"
+[patch.crates-io]
+mqtt-async-client = { git = "https://github.com/nathanielc/mqtt-async-client-rs.git", branch = "drain_shutdown" }

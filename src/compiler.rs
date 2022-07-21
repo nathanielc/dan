@@ -802,7 +802,26 @@ print x
         );
     }
     #[test]
-    fn test_number() {
+    fn test_float() {
+        let source = "
+        print 7.0
+";
+        let code = Interpreter::from_source(source).unwrap();
+        log::debug!("code:     {:?}", code);
+        assert_eq!(
+            Code {
+                instructions: vec![
+                    Instruction::Constant(0),
+                    Instruction::Print,
+                    Instruction::Term,
+                ],
+                constants: vec![Value::Float(7.0),],
+            },
+            code
+        );
+    }
+    #[test]
+    fn test_integer() {
         let source = "
         print 7
 ";
@@ -815,7 +834,7 @@ print x
                     Instruction::Print,
                     Instruction::Term,
                 ],
-                constants: vec![Value::Float(7.0),],
+                constants: vec![Value::Integer(7),],
             },
             code
         );
