@@ -272,6 +272,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "dan"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-std",
+ "async-trait",
+ "chrono",
+ "env_logger",
+ "futures",
+ "itertools",
+ "log",
+ "mqtt-async-client",
+ "peg",
+ "serde",
+ "serde_json",
+ "structopt",
+ "tokio",
+]
+
+[[package]]
 name = "either"
 version = "1.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -498,26 +518,6 @@ name = "itoa"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "112c678d4050afce233f4f2852bb2eb519230b3cf12f33585275537d7e41578d"
-
-[[package]]
-name = "jim"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-std",
- "async-trait",
- "chrono",
- "env_logger",
- "futures",
- "itertools",
- "log",
- "mqtt-async-client",
- "peg",
- "serde",
- "serde_json",
- "structopt",
- "tokio",
-]
 
 [[package]]
 name = "js-sys"

@@ -1,6 +1,6 @@
 use anyhow::anyhow;
 use env_logger;
-use jim::{compiler::Interpreter, mqtt_engine::MQTTEngine, vm::VM, Compile, Result};
+use dan::{compiler::Interpreter, mqtt_engine::MQTTEngine, vm::VM, Compile, Result};
 use std::path::PathBuf;
 use std::{fs, sync::Arc};
 use structopt::StructOpt;
@@ -10,7 +10,7 @@ use tokio::{select, signal, sync::broadcast, task::JoinSet};
 #[structopt(name = "example", about = "An example of StructOpt usage.")]
 struct Opt {
     /// URL to MQTT broker
-    #[structopt(short, long, default_value = "mqtt://localhost", env = "JIM_MQTT_URL")]
+    #[structopt(short, long, default_value = "mqtt://localhost", env = "DAN_MQTT_URL")]
     mqtt_url: String,
 
     /// Input directory
@@ -18,13 +18,13 @@ struct Opt {
         short,
         long,
         parse(from_os_str),
-        default_value = "jim.d",
-        env = "JIM_DIR"
+        default_value = "dan.d",
+        env = "DAN_DIR"
     )]
     dir: PathBuf,
 }
 
-const JIM_EXT: &str = "jim";
+const DAN_EXT: &str = "dan";
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -42,7 +42,7 @@ async fn main() -> Result<()> {
         let entry = entry?;
         if entry.path().is_file() {
             if let Some(ext) = entry.path().extension() {
-                if ext == JIM_EXT {
+                if ext == DAN_EXT {
                     let source = fs::read_to_string(entry.path())?;
                     let mqtt = mqtt.clone();
                     let shutdown_rx = shutdown_rx.resubscribe();

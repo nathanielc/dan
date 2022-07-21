@@ -1,46 +1,41 @@
-# Jim
+# Dan
 
 [![mqtt-smarthome](https://img.shields.io/badge/mqtt-smarthome-blue.svg)](https://github.com/mqtt-smarthome/mqtt-smarthome)
 
-Jim is a home automation assistant.
+Dan is a home automation programming language.
+The langauge has native support for working with MQTT.
 
-Jim comes with a simple DSL for connecting to devices via MQTT.
-The language suppors working with the [mqtt-smarthome](https://github.com/mqtt-smarthome) architecture.
+## Dan Example
 
-## DSL Example
+Lock all the doors at 10PM each night.
 
 ```
-scene nightime {
-    set almond/door/DoorLock/front locked
+scene night {
+    print "starting night scene"
 
-    when
-        almond/door/DoorLock/front is unlocked
-    wait 5m
-        set almond/door/DoorLock/front locked
+    set zwave/Front/DoorLock/98/0/targetMode/set {value: 255}
+    set zwave/Garage/DoorLock/98/0/targetMode/set {value: 255}
+
+    set zwave/Kitchen/DoorLock/98/0/targetMode/set {value: 255}
 }
 
-scene daytime {
-    when
-        almond/door/DoorLock/front is unlocked
-    wait 15m
-        set almond/door/DoorLock/front locked
-}
 
-at 8:00AM {
-    stop  nightime
-    start daytime
-}
+at 10:00PM start night
+```
 
-at 9:00AM {
-    stop daytime
-    start nightime
-}
+## Installing
 
+Install the dan binary using cargo:
+
+```
+$ cargo install dan
 ```
 
 
-## Binaries
+## Running
 
-This project contains two commands that can be run:
+Place the above example in a directory `./dan.d` and invoke dan:
 
-* jim - An command for running a Jim script file.
+```
+$ dan --mqtt-url mqtt://localhost --dir ./dan.d
+```

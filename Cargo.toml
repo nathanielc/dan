@@ -1,5 +1,5 @@
 [package]
-name = "jim"
+name = "dan"
 version = "0.1.0"
 authors = ["Nathaniel Cook <nvcook42@gmail.com>"]
 edition = "2021"
@@ -8,7 +8,7 @@ edition = "2021"
 path = "src/lib.rs"
 
 [[bin]]
-name = "jim"
+name = "dan"
 
 
 [dependencies]
