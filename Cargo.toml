@@ -1,9 +1,9 @@
 [package]
 name = "dan"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["Nathaniel Cook <nvcook42@gmail.com>"]
 edition = "2021"
-license-file = "LICENSE"
+license = "MIT"
 description = "Dan is a home automation programming langauge"
 homepage = "https://github.com/nathanielc/dan"
 repository = "https://github.com/nathanielc/dan"
