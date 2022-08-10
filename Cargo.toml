@@ -9,16 +9,16 @@ homepage = "https://github.com/nathanielc/dan"
 repository = "https://github.com/nathanielc/dan"
 readme = "README.md"
 
-
 [lib]
 path = "src/lib.rs"
 
 [[bin]]
 name = "dan"
 
+[build-dependencies]
+lalrpop = "0.19.8"
 
 [dependencies]
-peg = "0.8"
 anyhow = "1.0"
 futures = "0.3"
 tokio = { version = "1", features = ["full"] }
@@ -30,10 +30,10 @@ chrono = "0.4"
 structopt = { version = "0.3", default-features = false }
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
-[dependencies.mqtt-async-client]
-version = "0.3"
-default-features = false
-[dependencies.async-std]
-version = "1"
+async-std = "1"
+mqtt-async-client = {version ="0.3", default-features = false}
+regex = "1"
+lalrpop-util = { version = "0.19.8", features = ["lexer"] }
+
 [patch.crates-io]
 mqtt-async-client = { git = "https://github.com/nathanielc/mqtt-async-client-rs.git", branch = "drain_shutdown" }

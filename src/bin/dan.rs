@@ -1,6 +1,6 @@
 use anyhow::anyhow;
-use env_logger;
 use dan::{compiler::Interpreter, mqtt_engine::MQTTEngine, vm::VM, Compile, Result};
+use env_logger;
 use std::path::PathBuf;
 use std::{fs, sync::Arc};
 use structopt::StructOpt;
