@@ -267,30 +267,6 @@ impl Interpreter {
                     self.add_instruction(Instruction::Pop);
                 }
             }
-            Stmt::Once(path, expr, stmt) => {
-                let spawn_ip = self.add_instruction(Instruction::Spawn(usize::MAX));
-                // Add path
-                let const_index = self.add_constant(Value::Path(path));
-                self.add_instruction(Instruction::Constant(const_index));
-                // Add expr
-                self.interpret_expr(env, expr);
-                // Watch, creates a promise
-                self.add_instruction(Instruction::When);
-                // Add stmt
-                self.interpret_stmt(env, *stmt);
-                // Loop the spawned thread back to the beginning
-                self.add_instruction(Instruction::Term);
-
-                // backpatch the spawn jump pointer
-                let l = self.code.instructions.len();
-                if let Some(Instruction::Spawn(ip)) =
-                    self.code.instructions.get_mut(spawn_ip as usize)
-                {
-                    *ip = l;
-                } else {
-                    panic!("missing spawn instruction")
-                }
-            }
             Stmt::When(path, expr, stmt) => {
                 let spawn_ip = self.add_instruction(Instruction::Spawn(usize::MAX));
                 // Add path
@@ -416,7 +392,6 @@ impl Interpreter {
                     panic!("missing spawn instruction")
                 }
             }
-            Stmt::Func(..) => todo!(),
         };
     }
     fn interpret_expr<'a>(&mut self, env: &mut Env<'a>, expr: Expr) {
@@ -427,6 +402,12 @@ impl Interpreter {
                     panic!("undefined id");
                 }
                 self.add_instruction(Instruction::Pick(depth - 1));
+            }
+            Expr::Binary(lhs, _op, rhs) => {
+                self.interpret_expr(env, *rhs);
+                self.interpret_expr(env, *lhs);
+                // Handle BinaryOp
+                todo!()
             }
             Expr::String(_)
             | Expr::Duration(_)
@@ -447,7 +428,7 @@ mod tests {
 
     #[test]
     fn test_hello_world() {
-        let source = "print \"hello_world\"";
+        let source = r#"print "hello_world";"#;
         let code = Interpreter::from_source(source).unwrap();
         log::debug!("bytecode:     {:?}", code);
         assert_eq!(
@@ -464,16 +445,16 @@ mod tests {
     }
     #[test]
     fn test_let() {
-        let source = "
-let x = \"x\"
-let y = \"y\"
-let z = \"z\"
-print z
-print y
-print x
-print y
-print z
-";
+        let source = r#"
+let x = "x";
+let y = "y";
+let z = "z";
+print z;
+print y;
+print x;
+print y;
+print z;
+"#;
         let code = Interpreter::from_source(source).unwrap();
         log::debug!("bytecode:     {:?}", code);
         assert_eq!(
@@ -508,18 +489,18 @@ print z
     }
     #[test]
     fn test_let_block() {
-        let source = "
-let x = \"x\"
+        let source = r#"
+let x = "x";
 {
-    let y = \"y\"
-    let z = \"z\"
-    print z
-    print y
-    print x
-    print y
-    print z
-}
-";
+    let y = "y";
+    let z = "z";
+    print z;
+    print y;
+    print x;
+    print y;
+    print z;
+};
+"#;
         let code = Interpreter::from_source(source).unwrap();
         log::debug!("bytecode:     {:?}", code);
         assert_eq!(
@@ -554,18 +535,18 @@ let x = \"x\"
     }
     #[test]
     fn test_let_blocks() {
-        let source = "
-let x = \"x\"
+        let source = r#"
+let x = "x";
 {
-    let y = \"y\"
+    let y = "y";
     {
-        let z = \"z\"
-        { print z }
-    }
-    print y
-}
-print x
-";
+        let z = "z";
+        { print z; };
+    };
+    print y;
+};
+print x;
+"#;
         let code = Interpreter::from_source(source).unwrap();
         log::debug!("code:     {:?}", code);
         assert_eq!(
@@ -596,18 +577,18 @@ print x
     }
     #[test]
     fn test_let_shadow() {
-        let source = "
-let x = \"x\"
+        let source = r#"
+let x = "x";
 {
-    let x = \"y\"
+    let x = "y";
     {
-        let x = \"z\"
-        { print x }
-    }
-    print x
-}
-print x
-";
+        let x = "z";
+        { print x; };
+    };
+    print x;
+};
+print x;
+"#;
         let code = Interpreter::from_source(source).unwrap();
         log::debug!("code:     {:?}", code);
         assert_eq!(
@@ -638,9 +619,9 @@ print x
     }
     #[test]
     fn test_when() {
-        let source = "
-        when path is \"off\" print \"off\"
-";
+        let source = r#"
+        when [path] is "off" print "off";
+"#;
         let code = Interpreter::from_source(source).unwrap();
         log::debug!("code:     {:?}", code);
         assert_eq!(
@@ -665,38 +646,10 @@ print x
         );
     }
     #[test]
-    fn test_once() {
-        let source = "
-        once path is \"off\" print \"off\"
-";
-        let code = Interpreter::from_source(source).unwrap();
-        log::debug!("code:     {:?}", code);
-        assert_eq!(
-            Code {
-                instructions: vec![
-                    Instruction::Spawn(7),
-                    Instruction::Constant(0),
-                    Instruction::Constant(1),
-                    Instruction::When,
-                    Instruction::Constant(2),
-                    Instruction::Print,
-                    Instruction::Term,
-                    Instruction::Term,
-                ],
-                constants: vec![
-                    Value::Path("path".to_string()),
-                    Value::Str("off".to_string()),
-                    Value::Str("off".to_string())
-                ],
-            },
-            code
-        );
-    }
-    #[test]
     fn test_wait() {
-        let source = "
-        wait 1s print \"done\"
-";
+        let source = r#"
+        wait 1s print "done";
+"#;
         let code = Interpreter::from_source(source).unwrap();
         log::debug!("code:     {:?}", code);
         assert_eq!(
@@ -720,9 +673,9 @@ print x
     }
     #[test]
     fn test_set() {
-        let source = "
-        set path/to/value \"on\"
-";
+        let source = r#"
+        set [path/to/value] "on";
+"#;
         let code = Interpreter::from_source(source).unwrap();
         log::debug!("code:     {:?}", code);
         assert_eq!(
@@ -743,11 +696,11 @@ print x
     }
     #[test]
     fn test_scene() {
-        let source = "
-        scene night print \"x\"
-        start night
-        stop night
-";
+        let source = r#"
+        scene night { print "x"; };
+        start night;
+        stop night;
+"#;
         let code = Interpreter::from_source(source).unwrap();
         log::debug!("code:     {:?}", code);
         assert_eq!(
@@ -777,9 +730,9 @@ print x
     }
     #[test]
     fn test_at() {
-        let source = "
-        at 12:50PM print \"x\"
-";
+        let source = r#"
+        at 12:50PM print "x";
+"#;
         let code = Interpreter::from_source(source).unwrap();
         log::debug!("code:     {:?}", code);
         assert_eq!(
@@ -803,9 +756,9 @@ print x
     }
     #[test]
     fn test_float() {
-        let source = "
-        print 7.0
-";
+        let source = r#"
+        print 7.0;
+"#;
         let code = Interpreter::from_source(source).unwrap();
         log::debug!("code:     {:?}", code);
         assert_eq!(
@@ -822,9 +775,9 @@ print x
     }
     #[test]
     fn test_integer() {
-        let source = "
-        print 7
-";
+        let source = r#"
+        print 7;
+"#;
         let code = Interpreter::from_source(source).unwrap();
         log::debug!("code:     {:?}", code);
         assert_eq!(

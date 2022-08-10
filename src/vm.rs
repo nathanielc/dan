@@ -400,7 +400,7 @@ mod tests {
     #[tokio::test]
     async fn test_when() {
         let source = "
-        when path is \"on\" print \"off\"
+        when [path] is \"on\" print \"off\";
 ";
 
         let (te, shutdown) = run_vm(source);
@@ -427,7 +427,7 @@ mod tests {
     #[tokio::test]
     async fn test_wait() {
         let source = "
-            wait 1s print \"done\"
+            wait 1s print \"done\";
     ";
         let (te, shutdown) = run_vm(source);
         // TODO: remove this sleep
@@ -449,7 +449,7 @@ mod tests {
     #[tokio::test]
     async fn test_set() {
         let source = "
-            set path/to/value \"on\"
+            set [path/to/value] \"on\";
     ";
         let (te, shutdown) = run_vm(source);
         // TODO: remove this sleep
@@ -472,11 +472,11 @@ mod tests {
     #[tokio::test]
     async fn test_many_threads() {
         let source = "
-            wait 5s print \"a\"
-            wait 4s print \"b\"
-            wait 3s print \"c\"
-            wait 2s print \"d\"
-            wait 1s print \"e\"
+            wait 5s print \"a\";
+            wait 4s print \"b\";
+            wait 3s print \"c\";
+            wait 2s print \"d\";
+            wait 1s print \"e\";
     ";
         let (te, shutdown) = run_vm(source);
         // TODO: remove this sleep
@@ -504,9 +504,9 @@ mod tests {
     #[tokio::test]
     async fn test_scene() {
         let source = "
-        scene night print \"x\"
-        start night
-        stop night
+        scene night { print \"x\"; };
+        start night;
+        stop night;
     ";
         let (te, shutdown) = run_vm(source);
         // TODO: remove this sleep

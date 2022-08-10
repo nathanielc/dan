@@ -1,0 +1,111 @@
+use std::str::FromStr;
+use crate::ast::{Stmt, Expr, BinaryOpcode};
+
+use lalrpop_util::ParseError;
+
+grammar;
+
+pub File: Stmt = {
+    <(<Stmt> ";")*> => Stmt::Block(<>),
+}
+
+Stmt: Stmt = {
+    "set" <Path> <Expr> => Stmt::Set(<>),
+    "let" <Ident> "=" <Expr> => Stmt::Let(<>),
+    "when" <p:Path> "is" <e:Expr> <s:Stmt> => Stmt::When(p, e, Box::new(s)),
+    "wait" <e:Expr> <s:Stmt> => Stmt::Wait(e, Box::new(s)),
+    "at" <e:Expr> <s:Stmt> => Stmt::At(e, Box::new(s)),
+    "print" <Expr> => Stmt::Print(<>),
+    "scene" <i:Ident> <s:Stmt>  => Stmt::Scene(i, Box::new(s)),
+    "start" <Ident> => Stmt::Start(<>),
+    "stop" <Ident> => Stmt::Stop(<>),
+    "{" <(<Stmt> ";")*> "}" => Stmt::Block(<>),
+};
+
+
+
+Comma<T>: Vec<T> = { // (1)
+    <mut v:(<T> ",")*> <e:T?> => match e { // (2)
+        None => v,
+        Some(e) => {
+            v.push(e);
+            v
+        }
+    }
+};
+
+BinaryTier<BinaryOp, NextTier>: Expr = {
+    <l:BinaryTier<BinaryOp, NextTier>> <op:BinaryOp> <r:NextTier> => Expr::Binary(Box::new(l), op, Box::new(r)),
+    NextTier
+};
+
+Expr = BinaryTier<ExprOp, Factor>;
+Factor = BinaryTier<FactorOp, Term>;
+
+ExprOp: BinaryOpcode = {
+    "+" => BinaryOpcode::Add,
+    "-" => BinaryOpcode::Sub,
+};
+
+FactorOp: BinaryOpcode = {
+    "*" => BinaryOpcode::Mul,
+    "/" => BinaryOpcode::Div,
+}
+
+Term: Expr = {
+    Integer => Expr::Integer(<>),
+    Float => Expr::Float(<>),
+    Ident => Expr::Ident(<>),
+    String => Expr::String(<>),
+    Object => Expr::Object(<>),
+    Duration => Expr::Duration(<>),
+    Time => Expr::Time(<>),
+    "(" <Expr> ")",
+};
+
+Integer: i64 = {
+    r"[0-9]+" =>? i64::from_str(<>).map_err(|_| ParseError::User {
+        error: "integer is too big",
+    })
+};
+
+Float: f64 = {
+    r"[0-9]+\.[0-9]+" =>? f64::from_str(<>).map_err(|_| ParseError::User {
+        error: "float is too big",
+    })
+};
+
+Ident: String = {
+    r"[_a-zA-Z]+[_0-9a-zA-Z]*" => <>.to_string(),
+};
+
+String: String = {
+    r#""[^"]*""# => {
+        <>.trim_matches('"').to_string()
+    },
+};
+
+
+Object = {
+    "{" <Comma<Property>> "}"
+};
+
+Property: (String, Expr) = {
+    <Ident> ":" <Expr> => (<>),
+};
+
+Duration: String = {
+    r#"[0-9]+(h|m|s)"# => <>.to_string(),
+};
+
+Time: String = {
+    r#"(([0-9]+:[0-9]+(AM|PM))|#sunrise|#sunset)"# => <>.to_string(),
+};
+
+// TODO: create Path AST node that understands MQTT path elements.
+// This avoids having to parse the parse string later.
+Path: String = {
+    r#"\[[^ ]+\]"# => {
+        <>.trim_start_matches('[').trim_end_matches(']').to_string()
+    },
+};
