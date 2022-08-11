@@ -21,13 +21,12 @@ pub struct MQTTEngine {
 enum Request {
     Publish(Publish),
     Subscribe(Subscribe),
-    Watch(Watch),
+    Get(Get),
 }
 #[derive(Debug)]
-struct Watch {
+struct Get {
     path: String,
-    value: Vec<u8>,
-    tx: oneshot::Sender<()>,
+    tx: oneshot::Sender<Vec<u8>>,
 }
 
 enum SelectResult {
@@ -49,7 +48,7 @@ impl MQTTEngine {
     }
     async fn run(mut cli: Client, mut requests_rx: mpsc::Receiver<Request>) -> Result<()> {
         cli.connect().await?;
-        let mut watches: Vec<Watch> = Vec::new();
+        let mut watches: Vec<Get> = Vec::new();
         loop {
             let s = select! {
                 req = requests_rx.recv() =>  SelectResult::Request(req),
@@ -57,7 +56,7 @@ impl MQTTEngine {
             };
             match s {
                 SelectResult::Request(req) => match req {
-                    Some(Request::Watch(watch)) => watches.push(watch),
+                    Some(Request::Get(watch)) => watches.push(watch),
                     Some(Request::Publish(p)) => {
                         cli.publish(&p).await?;
                     }
@@ -69,9 +68,9 @@ impl MQTTEngine {
                 SelectResult::Data(data) => {
                     let mut i = 0 as usize;
                     while i < watches.len() {
-                        if data.topic() == watches[i].path && data.payload() == watches[i].value {
+                        if data.topic() == watches[i].path {
                             let w = watches.remove(i);
-                            w.tx.send(()).unwrap();
+                            w.tx.send(data.payload().to_vec()).unwrap();
                             continue;
                         }
                         i = i + 1;
@@ -93,7 +92,7 @@ impl MQTTEngine {
 
 #[async_trait]
 impl Engine for Arc<MQTTEngine> {
-    async fn when(&self, path: &str, value: Vec<u8>) -> Result<()> {
+    async fn get(&self, path: &str) -> Result<Vec<u8>> {
         let s = Subscribe::new(vec![SubscribeTopic {
             topic_path: path.to_string(),
             qos: QoS::AtLeastOnce,
@@ -102,9 +101,8 @@ impl Engine for Arc<MQTTEngine> {
 
         let (tx, rx) = oneshot::channel();
         self.requests_tx
-            .send(Request::Watch(Watch {
+            .send(Request::Get(Get {
                 path: path.to_string(),
-                value,
                 tx,
             }))
             .await?;

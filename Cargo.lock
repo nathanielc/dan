@@ -342,6 +342,7 @@ dependencies = [
  "lalrpop",
  "lalrpop-util",
  "log",
+ "macro-map",
  "mqtt-async-client",
  "regex",
  "serde",
@@ -741,6 +742,11 @@ dependencies = [
  "cfg-if",
  "value-bag",
 ]
+
+[[package]]
+name = "macro-map"
+version = "0.1.0"
+source = "git+https://github.com/masinc/macro-map-rust#e879f975a1883a34ccd5da9d3c494576067f0ded"
 
 [[package]]
 name = "maplit"

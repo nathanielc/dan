@@ -1,4 +1,4 @@
-use crate::ast::{Expr, Stmt};
+use crate::ast::{BinaryOpcode, Expr, Stmt};
 use crate::Compile;
 use anyhow::anyhow;
 use serde::Serialize;
@@ -18,6 +18,7 @@ pub enum Value {
     Time(TimeOfDay),
     Float(f64),
     Integer(i64),
+    Bool(bool),
     Object(BTreeMap<String, Value>),
     Jump(usize),
 }
@@ -31,6 +32,7 @@ impl Display for Value {
             Value::Time(t) => write!(f, "{}", t),
             Value::Float(fl) => write!(f, "{}", fl),
             Value::Integer(i) => write!(f, "{}", i),
+            Value::Bool(b) => write!(f, "{}", b),
             Value::Jump(ip) => write!(f, "jmp: {:?}", ip),
             Value::Object(props) => {
                 write!(f, "{{")?;
@@ -68,11 +70,52 @@ impl TryFrom<Value> for Vec<u8> {
             Value::Time(_) => todo!(),
             Value::Float(f) => Ok(f.to_string().as_bytes().to_vec()),
             Value::Integer(i) => Ok(i.to_string().as_bytes().to_vec()),
+            Value::Bool(_) => todo!(),
             Value::Jump(_) => todo!(),
             Value::Object(props) => {
                 let json = serde_json::to_vec(&props)?;
                 Ok(json)
             }
+        }
+    }
+}
+impl TryFrom<&[u8]> for Value {
+    type Error = anyhow::Error;
+
+    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
+        let v: serde_json::Value = serde_json::from_slice(value)?;
+        if let Some(v) = json_to_value(v) {
+            Ok(v)
+        } else {
+            Ok(Value::Str(String::from_utf8(value.to_vec())?))
+        }
+    }
+}
+fn json_to_value(v: serde_json::Value) -> Option<Value> {
+    match v {
+        serde_json::Value::Bool(b) => Some(Value::Bool(b)),
+        serde_json::Value::Number(f) => {
+            if f.is_i64() {
+                Some(Value::Integer(f.as_i64().unwrap()))
+            } else if f.is_f64() {
+                Some(Value::Float(f.as_f64().unwrap()))
+            } else {
+                None
+            }
+        }
+        serde_json::Value::String(s) => Some(Value::Str(s)),
+        serde_json::Value::Null => None,
+        serde_json::Value::Array(_) => None,
+        serde_json::Value::Object(jprops) => {
+            let mut props = BTreeMap::<String, Value>::new();
+            for (k, jv) in jprops {
+                if let Some(v) = json_to_value(jv) {
+                    props.insert(k, v);
+                } else {
+                    return None;
+                }
+            }
+            Some(Value::Object(props))
         }
     }
 }
@@ -160,17 +203,21 @@ pub enum Instruction {
     Print,
     Pick(usize),
     Pop,
+    Swap,
     Spawn(usize),
     Jump(usize),
+    JmpNot(usize),
     Call,
     Return,
     Term,
-    When,
     Wait,
     At,
     Set,
     Stop,
     SceneContext,
+    Get,
+    Equal,
+    Index,
 }
 
 #[derive(Debug, PartialEq)]
@@ -267,15 +314,12 @@ impl Interpreter {
                     self.add_instruction(Instruction::Pop);
                 }
             }
-            Stmt::When(path, expr, stmt) => {
+            Stmt::When(expr, stmt) => {
                 let spawn_ip = self.add_instruction(Instruction::Spawn(usize::MAX));
-                // Add path
-                let const_index = self.add_constant(Value::Path(path));
-                self.add_instruction(Instruction::Constant(const_index));
                 // Add expr
                 self.interpret_expr(env, expr);
-                // Watch, creates a promise
-                self.add_instruction(Instruction::When);
+                // Add Conditional Jump
+                self.add_instruction(Instruction::JmpNot(spawn_ip as usize + 1));
                 // Add stmt
                 self.interpret_stmt(env, *stmt);
                 // Loop the spawned thread back to the beginning
@@ -403,11 +447,18 @@ impl Interpreter {
                 }
                 self.add_instruction(Instruction::Pick(depth - 1));
             }
-            Expr::Binary(lhs, _op, rhs) => {
-                self.interpret_expr(env, *rhs);
+            Expr::Binary(lhs, op, rhs) => {
                 self.interpret_expr(env, *lhs);
-                // Handle BinaryOp
-                todo!()
+                self.interpret_expr(env, *rhs);
+                match op {
+                    BinaryOpcode::Eql => self.add_instruction(Instruction::Equal),
+                    _ => todo!(),
+                };
+            }
+            Expr::Path(p) => {
+                let path = self.add_constant(Value::Path(p));
+                self.add_instruction(Instruction::Constant(path));
+                self.add_instruction(Instruction::Get);
             }
             Expr::String(_)
             | Expr::Duration(_)
@@ -418,12 +469,32 @@ impl Interpreter {
                 let const_index = self.add_constant(expr.try_into().unwrap());
                 self.add_instruction(Instruction::Constant(const_index));
             }
+            Expr::As(init, id, cont) => {
+                // Compute the value and place it on the stack
+                self.interpret_expr(env, *init);
+
+                // Create new scope block for this value
+                let mut block_env = env.nest();
+                block_env.values.insert(id, block_env.depth);
+                block_env.depth += 1;
+                self.interpret_expr(&mut block_env, *cont);
+                self.add_instruction(Instruction::Swap);
+                self.add_instruction(Instruction::Pop);
+            }
+            Expr::Index(expr, prop) => {
+                // Compute the value and place it on the stack
+                self.interpret_expr(env, *expr);
+                let p = self.add_constant(Value::Str(prop));
+                self.add_instruction(Instruction::Constant(p));
+                self.add_instruction(Instruction::Index);
+            }
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
 
     #[test]
@@ -618,19 +689,103 @@ print x;
         );
     }
     #[test]
-    fn test_when() {
+    fn test_as() {
         let source = r#"
-        when [path] is "off" print "off";
+        print 1 as x x;
 "#;
         let code = Interpreter::from_source(source).unwrap();
         log::debug!("code:     {:?}", code);
         assert_eq!(
             Code {
                 instructions: vec![
-                    Instruction::Spawn(7),
                     Instruction::Constant(0),
+                    Instruction::Pick(0),
+                    Instruction::Pop,
+                    Instruction::Print,
+                    Instruction::Term,
+                ],
+                constants: vec![Value::Integer(1)],
+            },
+            code
+        );
+    }
+    #[test]
+    fn test_index() {
+        let source = r#"
+        let o = {x: 1};
+        print o.x;
+"#;
+        let code = Interpreter::from_source(source).unwrap();
+        log::debug!("code:     {:?}", code);
+        assert_eq!(
+            Code {
+                instructions: vec![
+                    Instruction::Constant(0),
+                    Instruction::Pick(0),
                     Instruction::Constant(1),
-                    Instruction::When,
+                    Instruction::Index,
+                    Instruction::Print,
+                    Instruction::Pop,
+                    Instruction::Term,
+                ],
+                constants: vec![
+                    Value::Object(btree_map![
+                        "x".to_string() => Value::Integer(1)
+                    ]),
+                    Value::Str("x".to_string()),
+                ],
+            },
+            code
+        );
+    }
+    #[test]
+    fn test_when() {
+        let source = r#"
+        when <path> is "off" print "off";
+"#;
+        let code = Interpreter::from_source(source).unwrap();
+        log::debug!("code:     {:?}", code);
+        assert_eq!(
+            Code {
+                instructions: vec![
+                    Instruction::Spawn(9),
+                    Instruction::Constant(0),
+                    Instruction::Get,
+                    Instruction::Constant(1),
+                    Instruction::Equal,
+                    Instruction::JmpNot(1),
+                    Instruction::Constant(2),
+                    Instruction::Print,
+                    Instruction::Jump(1),
+                    Instruction::Term,
+                ],
+                constants: vec![
+                    Value::Path("path".to_string()),
+                    Value::Str("off".to_string()),
+                    Value::Str("off".to_string())
+                ],
+            },
+            code
+        );
+    }
+    #[test]
+    fn test_when_as() {
+        let source = r#"
+        when <path> as x x is "off" print "off";
+"#;
+        let code = Interpreter::from_source(source).unwrap();
+        log::debug!("code:     {:?}", code);
+        assert_eq!(
+            Code {
+                instructions: vec![
+                    Instruction::Spawn(11),
+                    Instruction::Constant(0),
+                    Instruction::Get,
+                    Instruction::Pick(0),
+                    Instruction::Constant(1),
+                    Instruction::Equal,
+                    Instruction::Pop,
+                    Instruction::JmpNot(1),
                     Instruction::Constant(2),
                     Instruction::Print,
                     Instruction::Jump(1),

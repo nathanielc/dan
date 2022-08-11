@@ -12,7 +12,7 @@ pub File: Stmt = {
 Stmt: Stmt = {
     "set" <Path> <Expr> => Stmt::Set(<>),
     "let" <Ident> "=" <Expr> => Stmt::Let(<>),
-    "when" <p:Path> "is" <e:Expr> <s:Stmt> => Stmt::When(p, e, Box::new(s)),
+    "when" <e:Expr> <s:Stmt> => Stmt::When(e, Box::new(s)),
     "wait" <e:Expr> <s:Stmt> => Stmt::Wait(e, Box::new(s)),
     "at" <e:Expr> <s:Stmt> => Stmt::At(e, Box::new(s)),
     "print" <Expr> => Stmt::Print(<>),
@@ -39,18 +39,28 @@ BinaryTier<BinaryOp, NextTier>: Expr = {
     NextTier
 };
 
-Expr = BinaryTier<ExprOp, Factor>;
+Expr = {
+    <l:Expr> "as" <n:Ident> ":" <r:Eql> => Expr::As(Box::new(l), n, Box::new(r)),
+    Eql,
+}
+
+Eql = BinaryTier<EqlOp, Sum>;
+Sum = BinaryTier<SumOp, Factor>;
 Factor = BinaryTier<FactorOp, Term>;
 
-ExprOp: BinaryOpcode = {
+EqlOp: BinaryOpcode = {
+    "is" => BinaryOpcode::Eql,
+}
+SumOp: BinaryOpcode = {
     "+" => BinaryOpcode::Add,
     "-" => BinaryOpcode::Sub,
 };
-
 FactorOp: BinaryOpcode = {
     "*" => BinaryOpcode::Mul,
     "/" => BinaryOpcode::Div,
 }
+
+
 
 Term: Expr = {
     Integer => Expr::Integer(<>),
@@ -60,6 +70,8 @@ Term: Expr = {
     Object => Expr::Object(<>),
     Duration => Expr::Duration(<>),
     Time => Expr::Time(<>),
+    PathExpr => Expr::Path(<>),
+    IndexExpr,
     "(" <Expr> ")",
 };
 
@@ -102,6 +114,7 @@ Time: String = {
     r#"(([0-9]+:[0-9]+(AM|PM))|#sunrise|#sunset)"# => <>.to_string(),
 };
 
+
 // TODO: create Path AST node that understands MQTT path elements.
 // This avoids having to parse the parse string later.
 Path: String = {
@@ -109,3 +122,14 @@ Path: String = {
         <>.trim_start_matches('[').trim_end_matches(']').to_string()
     },
 };
+// TODO: create Path AST node that understands MQTT path elements.
+// This avoids having to parse the parse string later.
+PathExpr: String = {
+    r#"<[^ ]+>"# => {
+        <>.trim_start_matches('<').trim_end_matches('>').to_string()
+    },
+}
+
+IndexExpr: Expr = {
+    <o:Term> "." <p:Ident> => Expr::Index(Box::new(o), p),
+}

@@ -3,6 +3,9 @@ pub mod compiler;
 pub mod mqtt_engine;
 pub mod vm;
 
+#[macro_use(btree_map)]
+extern crate macro_map;
+
 //pub mod sun;
 
 pub type Result<T> = anyhow::Result<T>;
@@ -124,9 +127,25 @@ mod parser {
     #[test]
     fn test_when() {
         let expr = dan::FileParser::new()
-            .parse(r#"when [path] is 0 print 5;"#)
+            .parse(r#"when <path> is 0 print 5;"#)
             .unwrap();
-        assert_eq!(&format!("{:?}", expr), r#"[when path is 0 print 5;]"#);
+        assert_eq!(&format!("{:?}", expr), r#"[when (<path> is 0) print 5;]"#);
+    }
+    #[test]
+    fn test_as() {
+        let expr = dan::FileParser::new().parse(r#"print x as y y;"#).unwrap();
+        assert_eq!(&format!("{:?}", expr), r#"[print x as y y;]"#);
+        let expr = dan::FileParser::new()
+            .parse(r#"print x as a y as b b + c;"#)
+            .unwrap();
+        assert_eq!(&format!("{:?}", expr), r#"[print x as a y as b (b + c);]"#);
+        let expr = dan::FileParser::new()
+            .parse(r#"print 1 + 2 * 3 as a a / 4;"#)
+            .unwrap();
+        assert_eq!(
+            &format!("{:?}", expr),
+            r#"[print (1 + (2 * 3)) as a (a / 4);]"#
+        );
     }
     #[test]
     fn test_wait() {

@@ -11,6 +11,9 @@ pub enum Expr {
     Object(Vec<(String, Expr)>),
     Duration(String),
     Time(String),
+    Path(String),
+    As(Box<Expr>, String, Box<Expr>),
+    Index(Box<Expr>, String),
 }
 impl Debug for Expr {
     fn fmt(&self, fmt: &mut Formatter) -> Result<(), Error> {
@@ -32,6 +35,9 @@ impl Debug for Expr {
             }
             Expr::Duration(d) => write!(fmt, "{}", d),
             Expr::Time(t) => write!(fmt, "{}", t),
+            Expr::Path(p) => write!(fmt, "<{}>", p),
+            Expr::As(init, name, cont) => write!(fmt, "{:?} as {} {:?}", init, name, cont),
+            Expr::Index(obj, prop) => write!(fmt, "{:?}.{}", obj, prop),
         }
     }
 }
@@ -42,6 +48,7 @@ pub enum BinaryOpcode {
     Div,
     Add,
     Sub,
+    Eql,
 }
 
 impl Debug for BinaryOpcode {
@@ -51,6 +58,7 @@ impl Debug for BinaryOpcode {
             BinaryOpcode::Div => write!(fmt, "/"),
             BinaryOpcode::Add => write!(fmt, "+"),
             BinaryOpcode::Sub => write!(fmt, "-"),
+            BinaryOpcode::Eql => write!(fmt, "is"),
         }
     }
 }
@@ -60,7 +68,7 @@ pub enum Stmt {
     Block(Vec<Stmt>),
     Set(String, Expr),
     Let(String, Expr),
-    When(String, Expr, Box<Stmt>),
+    When(Expr, Box<Stmt>),
     //Once(String, Expr, Box<Stmt>),
     Wait(Expr, Box<Stmt>),
     At(Expr, Box<Stmt>),
@@ -88,7 +96,7 @@ impl Debug for Stmt {
             Stmt::Set(path, expr) => write!(fmt, "set {} {:?}", path, expr),
             Stmt::Expr(expr) => write!(fmt, "{:?}", expr),
             Stmt::Let(id, expr) => write!(fmt, "let {} = {:?}", id, expr),
-            Stmt::When(path, expr, body) => write!(fmt, "when {} is {:?} {:?}", path, expr, body),
+            Stmt::When(expr, body) => write!(fmt, "when {:?} {:?}", expr, body),
             Stmt::Wait(expr, body) => write!(fmt, "wait {:?} {:?}", expr, body),
             Stmt::At(expr, body) => write!(fmt, "at {:?} {:?}", expr, body),
             Stmt::Print(expr) => write!(fmt, "print {:?}", expr),
