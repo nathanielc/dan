@@ -5,6 +5,7 @@ use {
     futures::future::{BoxFuture, FutureExt},
     std::{convert::TryInto, fmt, sync::Arc, time::Duration},
     tokio::{
+        io::AsyncWriteExt,
         select,
         sync::{
             broadcast,
@@ -15,17 +16,26 @@ use {
     },
 };
 
+use tokio::io;
+
 use crate::compiler::{Code, Instruction, TimeOfDay, Value};
 
 const STACK_SIZE: usize = 512;
 
 #[async_trait]
 pub trait Engine: Clone + Send + Sync {
+    async fn print(&self, msg: &str) -> Result<()> {
+        let mut stdout = io::stdout();
+        stdout.write_all(msg.as_bytes()).await?;
+        stdout.write_all("\n".as_bytes()).await?;
+        stdout.flush().await?;
+        Ok(())
+    }
     async fn wait(&self, d: Duration) -> Result<()> {
         time::sleep(d).await;
         Ok(())
     }
-    async fn when(&self, path: &str, value: Vec<u8>) -> Result<()>;
+    async fn get(&self, path: &str) -> Result<Vec<u8>>;
     async fn set(&self, path: &str, value: Vec<u8>) -> Result<()>;
 }
 
@@ -154,13 +164,20 @@ impl<E: Engine + 'static> ThreadContext<E> {
                 self.push(self.code.constants[const_idx as usize].clone());
             }
             Instruction::Print => {
-                println!("{}", self.pop());
+                let msg = format!("{}", self.pop());
+                self.engine.print(msg.as_str()).await?;
             }
             Instruction::Pick(depth) => {
                 self.pick(depth);
             }
             Instruction::Pop => {
                 self.pop();
+            }
+            Instruction::Swap => {
+                let a = self.pop();
+                let b = self.pop();
+                self.push(a);
+                self.push(b);
             }
             Instruction::Spawn(ip) => {
                 let new_thread = self.spawn(self.ip);
@@ -179,11 +196,11 @@ impl<E: Engine + 'static> ThreadContext<E> {
                 // The thread will be dropped and forgotten
                 return Ok(StepResult::Break);
             }
-            Instruction::When => {
-                let value: Vec<u8> = self.pop().try_into()?;
+            Instruction::Get => {
                 let path: String = self.pop().try_into()?;
                 // Creature future and queue it for the executor
-                self.engine.when(path.as_str(), value).await?;
+                let value = self.engine.get(path.as_str()).await?;
+                self.push(value[..].try_into()?);
             }
             Instruction::Set => {
                 let value: Vec<u8> = self.pop().try_into()?;
@@ -241,6 +258,40 @@ impl<E: Engine + 'static> ThreadContext<E> {
                         panic!("at arg must be a time")
                     }
                 };
+            }
+            Instruction::Equal => {
+                let rhs = self.pop();
+                let lhs = self.pop();
+                self.push(Value::Bool(rhs == lhs))
+            }
+            Instruction::JmpNot(ip) => {
+                let v = self.pop();
+                match v {
+                    Value::Bool(true) => {
+                        // Do not jump
+                    }
+                    Value::Bool(false) => {
+                        self.ip = ip;
+                    }
+                    _ => {
+                        panic!("value must be a bool")
+                    }
+                }
+            }
+            Instruction::Index => {
+                if let Value::Str(prop) = self.pop() {
+                    if let Value::Object(props) = self.pop() {
+                        if let Some(v) = props.get(&prop) {
+                            self.push(v.to_owned());
+                        } else {
+                            panic!("object does not have property")
+                        }
+                    } else {
+                        panic!("cannot index into non object values")
+                    }
+                } else {
+                    panic!("index property must be a string value")
+                }
             }
         };
         Ok(StepResult::Continue)
@@ -303,20 +354,24 @@ mod tests {
     use crate::Compile;
 
     struct TestEngine {
+        print_count: AtomicUsize,
+        print_args: Mutex<Vec<String>>,
         wait_count: AtomicUsize,
         wait_args: Mutex<Vec<Duration>>,
-        when_count: AtomicUsize,
-        when_args: Mutex<Vec<(String, String)>>,
+        get_count: AtomicUsize,
+        get_args: Mutex<Vec<String>>,
         set_count: AtomicUsize,
         set_args: Mutex<Vec<(String, String)>>,
     }
     impl TestEngine {
         fn new() -> Arc<Self> {
             Arc::new(Self {
+                print_count: AtomicUsize::new(0),
+                print_args: Mutex::new(Vec::new()),
                 wait_count: AtomicUsize::new(0),
                 wait_args: Mutex::new(Vec::new()),
-                when_count: AtomicUsize::new(0),
-                when_args: Mutex::new(Vec::new()),
+                get_count: AtomicUsize::new(0),
+                get_args: Mutex::new(Vec::new()),
                 set_count: AtomicUsize::new(0),
                 set_args: Mutex::new(Vec::new()),
             })
@@ -325,21 +380,23 @@ mod tests {
 
     #[async_trait]
     impl Engine for Arc<TestEngine> {
+        async fn print(&self, msg: &str) -> Result<()> {
+            self.print_count.fetch_add(1, Ordering::SeqCst);
+            self.print_args.lock().unwrap().push(msg.to_string());
+            future::ready(Ok(())).await
+        }
         async fn wait(&self, d: Duration) -> Result<()> {
             self.wait_count.fetch_add(1, Ordering::SeqCst);
             self.wait_args.lock().unwrap().push(d.clone());
             future::ready(Ok(())).await
         }
 
-        async fn when(&self, path: &str, value: Vec<u8>) -> Result<()> {
-            let count = self.when_count.fetch_add(1, Ordering::SeqCst);
-            self.when_args
-                .lock()
-                .unwrap()
-                .push((path.to_string(), String::from_utf8(value.into()).unwrap()));
+        async fn get(&self, path: &str) -> Result<Vec<u8>> {
+            let count = self.get_count.fetch_add(1, Ordering::SeqCst);
+            self.get_args.lock().unwrap().push(path.to_string());
             println!("count {}", count);
             if count == 0 {
-                future::ready(Ok(())).await
+                future::ready(Ok("true".as_bytes().to_vec())).await
             } else {
                 empty().await
             }
@@ -396,31 +453,113 @@ mod tests {
         });
         (te, shutdown_tx)
     }
-
     #[tokio::test]
-    async fn test_when() {
+    async fn test_print() {
         let source = "
-        when [path] is \"on\" print \"off\";
+        print 1;
 ";
 
         let (te, shutdown) = run_vm(source);
         // TODO: remove this sleep
         time::sleep(Duration::from_millis(100)).await;
 
-        assert_eq!(0, te.wait_count.load(Ordering::SeqCst));
-        assert_eq!(0, te.set_count.load(Ordering::SeqCst));
-
-        assert_eq!(2, te.when_count.load(Ordering::SeqCst));
+        assert_eq!(1, te.print_count.load(Ordering::SeqCst));
         assert_eq!(
-            vec![
-                ("path".to_string(), "on".to_string()),
-                ("path".to_string(), "on".to_string())
-            ],
-            te.when_args
+            vec!["1".to_string(),],
+            te.print_args
                 .lock()
                 .unwrap()
                 .drain(..)
-                .collect::<Vec<(String, String)>>(),
+                .collect::<Vec<String>>(),
+        );
+        assert_eq!(0, te.wait_count.load(Ordering::SeqCst));
+        assert_eq!(0, te.set_count.load(Ordering::SeqCst));
+
+        assert_eq!(0, te.get_count.load(Ordering::SeqCst));
+        let _ = shutdown.send(());
+    }
+    #[tokio::test]
+    async fn test_as() {
+        let source = "
+        print 1 as x x;
+";
+
+        let (te, shutdown) = run_vm(source);
+        // TODO: remove this sleep
+        time::sleep(Duration::from_millis(100)).await;
+
+        assert_eq!(1, te.print_count.load(Ordering::SeqCst));
+        assert_eq!(
+            vec!["1".to_string(),],
+            te.print_args
+                .lock()
+                .unwrap()
+                .drain(..)
+                .collect::<Vec<String>>(),
+        );
+        assert_eq!(0, te.wait_count.load(Ordering::SeqCst));
+        assert_eq!(0, te.set_count.load(Ordering::SeqCst));
+
+        assert_eq!(0, te.get_count.load(Ordering::SeqCst));
+        let _ = shutdown.send(());
+    }
+    #[tokio::test]
+    async fn test_index() {
+        let source = "
+        let o = {x: 1};
+        print o.x;
+";
+
+        let (te, shutdown) = run_vm(source);
+        // TODO: remove this sleep
+        time::sleep(Duration::from_millis(100)).await;
+
+        assert_eq!(1, te.print_count.load(Ordering::SeqCst));
+        assert_eq!(
+            vec!["1".to_string(),],
+            te.print_args
+                .lock()
+                .unwrap()
+                .drain(..)
+                .collect::<Vec<String>>(),
+        );
+        assert_eq!(0, te.wait_count.load(Ordering::SeqCst));
+        assert_eq!(0, te.set_count.load(Ordering::SeqCst));
+
+        assert_eq!(0, te.get_count.load(Ordering::SeqCst));
+        let _ = shutdown.send(());
+    }
+
+    #[tokio::test]
+    async fn test_when() {
+        let source = "
+        when <path> print \"off\";
+";
+
+        let (te, shutdown) = run_vm(source);
+        // TODO: remove this sleep
+        time::sleep(Duration::from_millis(100)).await;
+
+        assert_eq!(1, te.print_count.load(Ordering::SeqCst));
+        assert_eq!(
+            vec!["off".to_string(),],
+            te.print_args
+                .lock()
+                .unwrap()
+                .drain(..)
+                .collect::<Vec<String>>(),
+        );
+        assert_eq!(0, te.wait_count.load(Ordering::SeqCst));
+        assert_eq!(0, te.set_count.load(Ordering::SeqCst));
+
+        assert_eq!(2, te.get_count.load(Ordering::SeqCst));
+        assert_eq!(
+            vec![("path".to_string()), ("path".to_string()),],
+            te.get_args
+                .lock()
+                .unwrap()
+                .drain(..)
+                .collect::<Vec<String>>(),
         );
         let _ = shutdown.send(());
     }
@@ -433,7 +572,7 @@ mod tests {
         // TODO: remove this sleep
         time::sleep(Duration::from_millis(100)).await;
 
-        assert_eq!(0, te.when_count.load(Ordering::SeqCst));
+        assert_eq!(0, te.get_count.load(Ordering::SeqCst));
         assert_eq!(0, te.set_count.load(Ordering::SeqCst));
         assert_eq!(1, te.wait_count.load(Ordering::SeqCst));
         assert_eq!(
@@ -455,7 +594,7 @@ mod tests {
         // TODO: remove this sleep
         time::sleep(Duration::from_millis(100)).await;
 
-        assert_eq!(0, te.when_count.load(Ordering::SeqCst));
+        assert_eq!(0, te.get_count.load(Ordering::SeqCst));
         assert_eq!(0, te.wait_count.load(Ordering::SeqCst));
 
         assert_eq!(1, te.set_count.load(Ordering::SeqCst));
@@ -482,7 +621,7 @@ mod tests {
         // TODO: remove this sleep
         time::sleep(Duration::from_millis(100)).await;
 
-        assert_eq!(0, te.when_count.load(Ordering::SeqCst));
+        assert_eq!(0, te.get_count.load(Ordering::SeqCst));
         assert_eq!(0, te.set_count.load(Ordering::SeqCst));
         assert_eq!(5, te.wait_count.load(Ordering::SeqCst));
         assert_eq!(
@@ -512,7 +651,7 @@ mod tests {
         // TODO: remove this sleep
         time::sleep(Duration::from_millis(100)).await;
 
-        assert_eq!(0, te.when_count.load(Ordering::SeqCst));
+        assert_eq!(0, te.get_count.load(Ordering::SeqCst));
         assert_eq!(0, te.set_count.load(Ordering::SeqCst));
         assert_eq!(0, te.wait_count.load(Ordering::SeqCst));
         let _ = shutdown.send(());

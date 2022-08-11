@@ -34,6 +34,7 @@ async-std = "1"
 mqtt-async-client = {version ="0.3", default-features = false}
 regex = "1"
 lalrpop-util = { version = "0.19.8", features = ["lexer"] }
+macro-map = { git = "https://github.com/masinc/macro-map-rust" }
 
 [patch.crates-io]
 mqtt-async-client = { git = "https://github.com/nathanielc/mqtt-async-client-rs.git", branch = "drain_shutdown" }
