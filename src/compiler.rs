@@ -139,7 +139,7 @@ impl TryFrom<Expr> for Value {
                     let time = if let Some(time) = t.strip_suffix("PM") {
                         hours += 12;
                         time
-                    } else if let Some(time) = t.strip_suffix("PM") {
+                    } else if let Some(time) = t.strip_suffix("AM") {
                         time
                     } else {
                         panic!("parser failed to enforce AM/PM ending to time")
@@ -167,6 +167,7 @@ impl TryFrom<Expr> for Value {
                 }
             },
             Expr::Float(n) => Ok(Value::Float(n)),
+            Expr::Boolean(n) => Ok(Value::Bool(n)),
             Expr::Integer(n) => Ok(Value::Integer(n)),
             Expr::Object(props) => {
                 let mut properties = BTreeMap::new();
@@ -464,6 +465,7 @@ impl Interpreter {
             | Expr::Duration(_)
             | Expr::Time(_)
             | Expr::Float(_)
+            | Expr::Boolean(_)
             | Expr::Integer(_)
             | Expr::Object(_) => {
                 let const_index = self.add_constant(expr.try_into().unwrap());
@@ -494,6 +496,8 @@ impl Interpreter {
 
 #[cfg(test)]
 mod tests {
+
+    use macro_map::btree_map;
 
     use super::*;
 
@@ -691,7 +695,7 @@ print x;
     #[test]
     fn test_as() {
         let source = r#"
-        print 1 as x x;
+        print 1 as x in x;
 "#;
         let code = Interpreter::from_source(source).unwrap();
         log::debug!("code:     {:?}", code);
@@ -700,6 +704,7 @@ print x;
                 instructions: vec![
                     Instruction::Constant(0),
                     Instruction::Pick(0),
+                    Instruction::Swap,
                     Instruction::Pop,
                     Instruction::Print,
                     Instruction::Term,
@@ -771,19 +776,20 @@ print x;
     #[test]
     fn test_when_as() {
         let source = r#"
-        when <path> as x x is "off" print "off";
+        when <path> as x in x is "off" print "off";
 "#;
         let code = Interpreter::from_source(source).unwrap();
         log::debug!("code:     {:?}", code);
         assert_eq!(
             Code {
                 instructions: vec![
-                    Instruction::Spawn(11),
+                    Instruction::Spawn(12),
                     Instruction::Constant(0),
                     Instruction::Get,
                     Instruction::Pick(0),
                     Instruction::Constant(1),
                     Instruction::Equal,
+                    Instruction::Swap,
                     Instruction::Pop,
                     Instruction::JmpNot(1),
                     Instruction::Constant(2),
@@ -905,6 +911,25 @@ print x;
                     Value::Time(TimeOfDay::HM(12, 50)),
                     Value::Str("x".to_string()),
                 ],
+            },
+            code
+        );
+    }
+    #[test]
+    fn test_bool() {
+        let source = r#"
+        print true;
+"#;
+        let code = Interpreter::from_source(source).unwrap();
+        log::debug!("code:     {:?}", code);
+        assert_eq!(
+            Code {
+                instructions: vec![
+                    Instruction::Constant(0),
+                    Instruction::Print,
+                    Instruction::Term,
+                ],
+                constants: vec![Value::Bool(true),],
             },
             code
         );

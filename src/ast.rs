@@ -3,6 +3,7 @@ use std::fmt::{Debug, Error, Formatter};
 /// The AST node for expressions.
 #[derive(Clone, PartialEq)]
 pub enum Expr {
+    Boolean(bool),
     Integer(i64),
     Float(f64),
     Binary(Box<Expr>, BinaryOpcode, Box<Expr>),
@@ -18,26 +19,27 @@ pub enum Expr {
 impl Debug for Expr {
     fn fmt(&self, fmt: &mut Formatter) -> Result<(), Error> {
         match self {
-            Expr::Integer(i) => write!(fmt, "{:?}", i),
-            Expr::Float(f) => write!(fmt, "{:?}", f),
-            Expr::Binary(l, op, r) => write!(fmt, "({:?} {:?} {:?})", l, op, r),
-            Expr::Ident(i) => write!(fmt, "{}", i),
-            Expr::String(s) => write!(fmt, "{:?}", s),
+            Expr::Boolean(b) => write!(fmt, "{b:?}"),
+            Expr::Integer(i) => write!(fmt, "{i:?}"),
+            Expr::Float(f) => write!(fmt, "{f:?}"),
+            Expr::Binary(l, op, r) => write!(fmt, "({l:?} {op:?} {r:?})"),
+            Expr::Ident(i) => write!(fmt, "{i}"),
+            Expr::String(s) => write!(fmt, "{s:?}"),
             Expr::Object(props) => {
                 write!(fmt, "{{")?;
                 for (i, (k, v)) in props.iter().enumerate() {
                     if i > 0 {
                         write!(fmt, ", ")?;
                     }
-                    write!(fmt, "{}: {:?}", k, v)?;
+                    write!(fmt, "{k}: {v:?}")?;
                 }
                 write!(fmt, "}}")
             }
-            Expr::Duration(d) => write!(fmt, "{}", d),
-            Expr::Time(t) => write!(fmt, "{}", t),
-            Expr::Path(p) => write!(fmt, "<{}>", p),
-            Expr::As(init, name, cont) => write!(fmt, "{:?} as {} {:?}", init, name, cont),
-            Expr::Index(obj, prop) => write!(fmt, "{:?}.{}", obj, prop),
+            Expr::Duration(d) => write!(fmt, "{d}"),
+            Expr::Time(t) => write!(fmt, "{t}"),
+            Expr::Path(p) => write!(fmt, "<{p}>"),
+            Expr::As(init, name, cont) => write!(fmt, "{init:?} as {name} in {cont:?}",),
+            Expr::Index(obj, prop) => write!(fmt, "{obj:?}.{prop}",),
         }
     }
 }

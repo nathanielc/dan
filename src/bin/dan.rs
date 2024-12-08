@@ -1,6 +1,5 @@
 use anyhow::anyhow;
 use dan::{compiler::Interpreter, mqtt_engine::MQTTEngine, vm::VM, Compile, Result};
-use env_logger;
 use std::path::PathBuf;
 use std::{fs, sync::Arc};
 use structopt::StructOpt;
@@ -50,7 +49,7 @@ async fn main() -> Result<()> {
                     join_set.spawn(async move {
                         log::debug!("running file: {}", path.display());
                         let code = Interpreter::from_source(&source)?;
-                        log::debug!("code: {:?}", code);
+                        log::debug!("code: {:#?}", code);
                         let vm = VM::new(mqtt);
                         vm.run(code, shutdown_rx).await?;
                         log::debug!("finished file: {} ", path.display());

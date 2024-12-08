@@ -1,6 +1,6 @@
 use anyhow::Result;
 use async_trait::async_trait;
-use std::sync::Arc;
+use std::{collections::HashSet, sync::Arc};
 use tokio::{
     select,
     sync::{mpsc, oneshot},
@@ -49,6 +49,9 @@ impl MQTTEngine {
     async fn run(mut cli: Client, mut requests_rx: mpsc::Receiver<Request>) -> Result<()> {
         cli.connect().await?;
         let mut watches: Vec<Get> = Vec::new();
+        // Deduplicate subscriptions so we do not get busy loops getting messages of after
+        // re-subscribing.
+        let mut subscriptions: HashSet<String, _> = HashSet::new();
         loop {
             let s = select! {
                 req = requests_rx.recv() =>  SelectResult::Request(req),
@@ -61,19 +64,29 @@ impl MQTTEngine {
                         cli.publish(&p).await?;
                     }
                     Some(Request::Subscribe(s)) => {
-                        cli.subscribe(s).await?;
+                        let topic_paths: Vec<_> =
+                            s.topics().iter().map(|t| t.topic_path.clone()).collect();
+                        if topic_paths.iter().any(|t| !subscriptions.contains(t)) {
+                            cli.subscribe(s).await?;
+                        }
+                        subscriptions.extend(topic_paths.into_iter());
                     }
                     None => break,
                 },
                 SelectResult::Data(data) => {
-                    let mut i = 0 as usize;
+                    log::debug!(
+                        "data receieved for topic {} {}",
+                        data.topic(),
+                        std::str::from_utf8(data.payload()).unwrap()
+                    );
+                    let mut i = 0_usize;
                     while i < watches.len() {
                         if data.topic() == watches[i].path {
                             let w = watches.remove(i);
                             w.tx.send(data.payload().to_vec()).unwrap();
                             continue;
                         }
-                        i = i + 1;
+                        i += 1;
                     }
                 }
             }
@@ -93,12 +106,6 @@ impl MQTTEngine {
 #[async_trait]
 impl Engine for Arc<MQTTEngine> {
     async fn get(&self, path: &str) -> Result<Vec<u8>> {
-        let s = Subscribe::new(vec![SubscribeTopic {
-            topic_path: path.to_string(),
-            qos: QoS::AtLeastOnce,
-        }]);
-        self.requests_tx.send(Request::Subscribe(s)).await?;
-
         let (tx, rx) = oneshot::channel();
         self.requests_tx
             .send(Request::Get(Get {
@@ -106,6 +113,12 @@ impl Engine for Arc<MQTTEngine> {
                 tx,
             }))
             .await?;
+        // Subscribe after sending get so we are listening before we recieve the response
+        let s = Subscribe::new(vec![SubscribeTopic {
+            topic_path: path.to_string(),
+            qos: QoS::AtLeastOnce,
+        }]);
+        self.requests_tx.send(Request::Subscribe(s)).await?;
         Ok(rx.await?)
     }
 

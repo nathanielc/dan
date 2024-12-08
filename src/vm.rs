@@ -1,3 +1,5 @@
+use std::sync::atomic::AtomicUsize;
+
 use {
     anyhow::Result,
     async_trait::async_trait,
@@ -44,6 +46,7 @@ struct Thread<E: Engine> {
     ctx: ThreadContext<E>,
 }
 struct ThreadContext<E: Engine> {
+    id: usize,
     engine: E,
     code: Arc<Code>,
     ip: usize,
@@ -80,6 +83,7 @@ impl<E: Engine + 'static> Thread<E> {
         Thread {
             cancel_rx,
             ctx: ThreadContext {
+                id: Thread::<E>::next_id(),
                 engine,
                 code,
                 ip,
@@ -90,6 +94,11 @@ impl<E: Engine + 'static> Thread<E> {
                 cancel_tx,
             },
         }
+    }
+
+    fn next_id() -> usize {
+        static ID: AtomicUsize = AtomicUsize::new(0);
+        ID.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
     }
     fn run(self, shutdown: broadcast::Receiver<()>) -> BoxFuture<'static, Result<()>> {
         // Use boxed indirection to avoid recusive async calls.
@@ -125,6 +134,7 @@ impl<E: Engine + 'static> ThreadContext<E> {
         let cancel_rx = self.cancel_tx.subscribe();
         Thread {
             ctx: ThreadContext {
+                id: Thread::<E>::next_id(),
                 engine: self.engine.clone(),
                 code: self.code.clone(),
                 ip,
@@ -158,10 +168,10 @@ impl<E: Engine + 'static> ThreadContext<E> {
         let inst_addr = self.ip;
         self.ip += 1;
 
-        log::debug!("inst: {:?}", self.code.instructions[inst_addr]);
+        log::debug!("inst[{}]: {:?}", self.id, self.code.instructions[inst_addr]);
         match self.code.instructions[inst_addr] {
             Instruction::Constant(const_idx) => {
-                self.push(self.code.constants[const_idx as usize].clone());
+                self.push(self.code.constants[const_idx].clone());
             }
             Instruction::Print => {
                 let msg = format!("{}", self.pop());
@@ -387,7 +397,7 @@ mod tests {
         }
         async fn wait(&self, d: Duration) -> Result<()> {
             self.wait_count.fetch_add(1, Ordering::SeqCst);
-            self.wait_args.lock().unwrap().push(d.clone());
+            self.wait_args.lock().unwrap().push(d);
             future::ready(Ok(())).await
         }
 
@@ -481,7 +491,7 @@ mod tests {
     #[tokio::test]
     async fn test_as() {
         let source = "
-        print 1 as x x;
+        print 1 as x in x;
 ";
 
         let (te, shutdown) = run_vm(source);

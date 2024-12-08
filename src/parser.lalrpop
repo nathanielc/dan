@@ -40,7 +40,7 @@ BinaryTier<BinaryOp, NextTier>: Expr = {
 };
 
 Expr = {
-    <l:Expr> "as" <n:Ident> ":" <r:Eql> => Expr::As(Box::new(l), n, Box::new(r)),
+    <l:Expr> "as" <n:Ident> "in" <r:Eql> => Expr::As(Box::new(l), n, Box::new(r)),
     Eql,
 }
 
@@ -63,6 +63,7 @@ FactorOp: BinaryOpcode = {
 
 
 Term: Expr = {
+    Boolean => Expr::Boolean(<>),
     Integer => Expr::Integer(<>),
     Float => Expr::Float(<>),
     Ident => Expr::Ident(<>),
@@ -73,6 +74,11 @@ Term: Expr = {
     PathExpr => Expr::Path(<>),
     IndexExpr,
     "(" <Expr> ")",
+};
+
+Boolean: bool = {
+    "true" => true,
+    "false" => false,
 };
 
 Integer: i64 = {
