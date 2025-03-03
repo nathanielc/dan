@@ -2,8 +2,8 @@ pub mod ast;
 pub mod compiler;
 pub mod mqtt_engine;
 pub mod parser;
+pub mod sun;
 pub mod vm;
-//pub mod sun;
 
 pub type Result<T> = anyhow::Result<T>;
 

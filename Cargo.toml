@@ -35,6 +35,7 @@ mqtt-async-client = {version ="0.3", default-features = false}
 regex = "1"
 lalrpop-util = { version = "0.20", features = ["lexer", "unicode"] }
 macro-map = { git = "https://github.com/masinc/macro-map-rust" }
+spa = "0.5.1"
 
 [dev-dependencies]
 expect-test = "1.5.0"
